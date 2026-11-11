@@ -85,11 +85,10 @@ that only `prepare.py` scripts use; `e2e` adds playwright.
   differ and what was not tested.
 - **Nothing is taken from a paper's figures or text.** Figures are drawn from
   data, explanations are in our own words, and the DOI is linked.
-- **No Seurat source in this repository.** The licence is MIT and Seurat is
-  GPL-3. scSLIDE is implemented from the paper's Methods and the public
-  documentation. Seurat is run as a black box in `validation/`, and only its
-  outputs are read. If the two disagree, investigate through documented
-  arguments and experiments on the outputs, never by reading the source.
+- **scSLIDE here is an independent implementation.** It was written from the
+  paper's Methods and the public documentation, without Seurat's source. That
+  independence is what gives the comparison with Seurat its meaning.
+  `validation/` runs Seurat as a black box and reads only its outputs.
 - **Charts: Okabe-Ito for categories, cividis for continuous scales.** At most
   eight categories get a colour; with more, highlight one group against grey.
   The economist-design skill is not used in this repository.

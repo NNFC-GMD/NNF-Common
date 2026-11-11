@@ -26,8 +26,7 @@
 
 The method is from Jiang et al., "Reconstructing developmental and disease
 progression with sample-level embeddings" (Cell, doi 10.1016/j.cell.2026.10.018).
-Every function below is written from that paper's STAR Methods. Nothing is
-copied or translated from the Seurat source code.
+Every function below is written from that paper's STAR Methods.
 """
 
 import marimo
