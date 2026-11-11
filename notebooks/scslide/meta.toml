@@ -1,0 +1,15 @@
+title = "scSLIDE, step by step"
+summary = "How to compare samples instead of cells: each step of scSLIDE explained with pictures you can play with, then replicated on a CRISPR screen."
+notebook = "scslide.py"
+audience = "Everyone; no coding needed"
+minutes = 30
+tags = ["single-cell", "sample-level analysis", "Perturb-seq", "replication"]
+order = 1
+# Also publish edit.html, the same page with its code visible and editable.
+edit_copy = true
+# Shown only once Python has run in the browser; website/check_site.py waits for it.
+browser_text = "computed in your browser"
+
+[paper]
+citation = "Jiang et al., Cell (2027)"
+doi = "10.1016/j.cell.2026.10.018"

@@ -1,0 +1,86 @@
+{
+    "source": {
+        "accession": "GSE132080",
+        "citation": "Jost et al., Nature Biotechnology 38, 355-364 (2020)",
+        "doi": "10.1038/s41587-019-0387-5",
+        "url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE132nnn/GSE132080/suppl/",
+        "files": [
+            {
+                "file": "GSE132080_10X_barcodes.tsv.gz",
+                "sha256": "5ac798d460d21a0ca190f3c11d952ea98fa15ec2f4b2a0ec6d1cde2e7202aa65",
+                "bytes": 94141
+            },
+            {
+                "file": "GSE132080_10X_genes.tsv.gz",
+                "sha256": "cb459e6f14a8008e68f2ae535ac5411b6651d278355e9b517ff6a7e43587e603",
+                "bytes": 264786
+            },
+            {
+                "file": "GSE132080_10X_matrix.mtx.gz",
+                "sha256": "7c908fbb76feaccac285209bf2578970873f8b8ec819e2a88ac6b83e3553239d",
+                "bytes": 352247428
+            },
+            {
+                "file": "GSE132080_cell_identities.csv.gz",
+                "sha256": "db9a2bab685004537fccd7aa2b5e19c6c1fc782eca9a4eb1d9275ffe2a19b0a0",
+                "bytes": 366158
+            },
+            {
+                "file": "GSE132080_sgRNA_barcode_sequences_and_phenotypes.csv.gz",
+                "sha256": "9ddc95fe2b668fe2bad0acd74c9c65daac6d88b4b414c41a363f240fadb2b505",
+                "bytes": 4463
+            }
+        ]
+    },
+    "parameters": {
+        "min_genes": 500,
+        "min_umis": 1000,
+        "scale_factor": 10000,
+        "n_variable_genes": 2000,
+        "label_gene_fraction": 0.01,
+        "label_gene_min_detection": 0.1,
+        "scale_clip": 10.0,
+        "n_pca": 30,
+        "n_pls": 20,
+        "pls_response": "target gene",
+        "n_landmarks": 5000,
+        "umap_neighbours": 20,
+        "neighbour_candidates": 200,
+        "bandwidth_rank": 20,
+        "seed": 0
+    },
+    "summary": {
+        "cells_with_one_assigned_guide": 19587,
+        "cells_removed_by_gene_and_umi_thresholds": 0,
+        "cells": 19587,
+        "guides": 138,
+        "target_genes": 25,
+        "control_guides": 10,
+        "variable_genes": 2000,
+        "label_correlated_genes": 988,
+        "pls_features": 2508,
+        "landmarks": 5000,
+        "leverage_sketch_vs_exact_correlation": 0.9516
+    },
+    "versions": {
+        "numpy": "2.4.6",
+        "scipy": "1.17.1",
+        "pandas": "3.0.6",
+        "scikit-learn": "1.8.0",
+        "scanpy": "1.12.5",
+        "anndata": "0.13.4",
+        "umap-learn": "0.6.0"
+    },
+    "files": [
+        {
+            "file": "cells.npz",
+            "sha256": "71e3cd415dc68dc6ec0895b2c58820dc9612d5fd65d43da3c13b654fe191ced2",
+            "bytes": 2797960
+        },
+        {
+            "file": "sgrna.csv",
+            "sha256": "baaa0487962179c113eb81e49a5f1e7552d7a42248f97e5b9c7a6dae2b0fbf26",
+            "bytes": 17269
+        }
+    ]
+}

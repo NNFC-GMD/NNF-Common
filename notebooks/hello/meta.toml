@@ -1,0 +1,10 @@
+title = "Hello, WebAssembly"
+summary = "The smallest page that exercises the publishing pipeline: reads a file, draws a chart, reacts to a slider."
+notebook = "hello.py"
+audience = "Contributors"
+minutes = 1
+tags = ["template"]
+# Built and tested with the site, but not shown on the landing page.
+listed = false
+# Shown only once Python has run in the browser; website/check_site.py waits for it.
+browser_text = "emscripten"

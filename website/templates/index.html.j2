@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>NNFC notebooks</title>
+    <meta name="description" content="Notebooks and tutorials from the Novo Nordisk Foundation Center for Genomic Mechanisms of Disease. They run in your browser; nothing to install.">
+    <link rel="icon" href="static/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="static/site.css">
+</head>
+<body>
+    <header class="site-header">
+        <p class="eyebrow">Novo Nordisk Foundation Center for Genomic Mechanisms of Disease</p>
+        <h1>Notebooks and tutorials</h1>
+        <p class="lede">
+            Each page explains one analysis and lets you try it. The pages run in your
+            browser: there is nothing to install and no code to write.
+        </p>
+    </header>
+
+    <main>
+        {% if pages %}
+        <ul class="cards">
+            {% for page in pages %}
+            <li class="card">
+                <h2><a href="{{ page.slug }}/">{{ page.title }}</a></h2>
+                <p class="summary">{{ page.summary }}</p>
+                <dl class="facts">
+                    {% if page.audience is defined %}
+                    <div><dt>For</dt><dd>{{ page.audience }}</dd></div>
+                    {% endif %}
+                    {% if page.minutes is defined %}
+                    <div><dt>Reading time</dt><dd>{{ page.minutes }} min</dd></div>
+                    {% endif %}
+                    {% if page.paper is defined %}
+                    <div>
+                        <dt>Paper</dt>
+                        <dd>
+                            {% if page.paper.doi is defined %}
+                            <a href="https://doi.org/{{ page.paper.doi }}">{{ page.paper.citation }}</a>
+                            {% else %}
+                            {{ page.paper.citation }}
+                            {% endif %}
+                        </dd>
+                    </div>
+                    {% endif %}
+                </dl>
+                {% if page.edit_copy %}
+                <p class="edit-link">
+                    <a href="{{ page.slug }}/edit.html">Open the version with editable code</a>.
+                    It starts idle: press the round run button at the bottom right.
+                </p>
+                {% endif %}
+                {% if page.tags %}
+                <ul class="tags">
+                    {% for tag in page.tags %}
+                    <li>{{ tag }}</li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="empty">No notebooks are published yet.</p>
+        {% endif %}
+    </main>
+
+    <footer class="site-footer">
+        <p>
+            The first time you open a page your browser downloads a Python runtime,
+            which takes a little while. After that it is cached.
+        </p>
+    </footer>
+</body>
+</html>

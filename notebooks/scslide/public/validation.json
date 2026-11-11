@@ -1,0 +1,100 @@
+{
+    "seurat_version": "6.0.0",
+    "seurat_seeds": [
+        7,
+        123
+    ],
+    "python_seeds": [
+        0,
+        1,
+        2
+    ],
+    "landmarks": 5000,
+    "seurat_count_total": 72935,
+    "cells": 19587,
+    "python_vs_python": [
+        0.9843,
+        0.9845,
+        0.9837
+    ],
+    "seurat_vs_seurat": [
+        0.9837
+    ],
+    "python_vs_seurat": {
+        "mean": 0.9811,
+        "min": 0.9796,
+        "max": 0.9819
+    },
+    "uniform_vs_leverage_landmarks": 0.9682,
+    "subspace_agreement": {
+        "pca": 1.0,
+        "pls": 0.9999
+    },
+    "with_seurat_landmark_cells": {
+        "seurat_coordinates_landmarks_do_not_vote": 0.9931,
+        "seurat_coordinates_every_cell_votes": 0.9848,
+        "python_coordinates_landmarks_do_not_vote": 0.9929,
+        "python_coordinates_every_cell_votes": 0.9847
+    },
+    "weight_sweep_with_seurat_landmark_cells": [
+        {
+            "weight": 0.4,
+            "r_with_seurat": 0.9757,
+            "ribosomal": 0.1718
+        },
+        {
+            "weight": 0.45,
+            "r_with_seurat": 0.9911,
+            "ribosomal": 0.1145
+        },
+        {
+            "weight": 0.5,
+            "r_with_seurat": 0.9929,
+            "ribosomal": 0.056
+        },
+        {
+            "weight": 0.55,
+            "r_with_seurat": 0.9874,
+            "ribosomal": 0.0105
+        },
+        {
+            "weight": 0.6,
+            "r_with_seurat": 0.9788,
+            "ribosomal": -0.0112
+        }
+    ],
+    "what_each_matrix_says": {
+        "Python": {
+            "3-NN accuracy": 0.9453,
+            "Spearman, near controls vs activity": -0.4877,
+            "control-control r": 0.0658,
+            "same-gene r (active guides)": 0.5195,
+            "RPS14/15/18 cross r": 0.0576,
+            "EIF2S1-HSPA9 r": 0.2651
+        },
+        "Seurat, seed 7": {
+            "3-NN accuracy": 0.9609,
+            "Spearman, near controls vs activity": -0.4976,
+            "control-control r": 0.066,
+            "same-gene r (active guides)": 0.5077,
+            "RPS14/15/18 cross r": 0.1109,
+            "EIF2S1-HSPA9 r": 0.245
+        },
+        "Seurat, seed 123": {
+            "3-NN accuracy": 0.9609,
+            "Spearman, near controls vs activity": -0.4869,
+            "control-control r": 0.0643,
+            "same-gene r (active guides)": 0.505,
+            "RPS14/15/18 cross r": 0.1203,
+            "EIF2S1-HSPA9 r": 0.2395
+        },
+        "Python, with Seurat's landmark cells": {
+            "3-NN accuracy": 0.9531,
+            "Spearman, near controls vs activity": -0.495,
+            "control-control r": 0.0658,
+            "same-gene r (active guides)": 0.5173,
+            "RPS14/15/18 cross r": 0.056,
+            "EIF2S1-HSPA9 r": 0.2431
+        }
+    }
+}

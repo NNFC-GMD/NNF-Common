@@ -1,0 +1,6 @@
+# Line length is left to the writer.
+MD013: false
+# marimo renders Markdown with Python-Markdown, which needs 4-space indentation
+# for nested lists.
+MD007:
+  indent: 4

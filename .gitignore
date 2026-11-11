@@ -1,0 +1,33 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+.DS_Store
+
+# pixi environments
+.pixi/
+
+# marimo session state
+__marimo__/
+
+# The built site
+_site/
+
+# Raw downloads and run outputs never belong in git. Only the small derived
+# files under notebooks/*/public/ are tracked (see CLAUDE.md).
+data/
+results/
+logs/
+*.h5ad
+*.h5
+*.loom
+*.mtx
+*.mtx.gz
+*.rds
+*.fastq.gz
+*.bam
+
+# The isolated R library and the outputs of the port-fidelity check
+.r-lib/
+validation/**/out/

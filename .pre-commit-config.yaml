@@ -1,0 +1,63 @@
+# Install once per clone (commit and push hooks):  pixi run -e dev install-hooks
+# Run on every tracked file:                       pixi run -e dev lint
+default_install_hook_types: [pre-commit, pre-push]
+default_stages: [pre-commit]
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        stages: [pre-commit]  # its manifest also lists pre-push
+      - id: end-of-file-fixer
+        stages: [pre-commit]  # its manifest also lists pre-push
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+      - id: pretty-format-json
+        args: [--autofix, --indent=4, --no-sort-keys]
+      - id: check-merge-conflict
+      - id: detect-private-key
+      # 512 KB = 524,288 bytes, checked at commit and again at push.
+      # --enforce-all also checks modified files; without it the CI run checks
+      # nothing. The lockfile is generated and may outgrow the limit.
+      - id: check-added-large-files
+        args: [--maxkb=512, --enforce-all]
+        exclude: ^(pixi\.lock$|notebooks/[^/]+/public/)
+        stages: [pre-commit, pre-push]
+      # The one exception: the small derived files a notebook ships to the
+      # browser, at most 5 MB each. tests/ checks the 10 MB total per notebook.
+      - id: check-added-large-files
+        alias: check-added-large-files-public
+        name: check for added large files (notebook public data, 5 MB)
+        args: [--maxkb=5120, --enforce-all]
+        files: ^notebooks/[^/]+/public/
+        stages: [pre-commit, pre-push]
+      # main only changes through pull requests.
+      - id: no-commit-to-branch
+        args: [--branch, main]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    # The only ruff pin in the repository.
+    rev: v0.16.10
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.49.1
+    hooks:
+      - id: markdownlint
+
+  - repo: local
+    hooks:
+      - id: forbid-tabs
+        name: forbid tab characters
+        entry: '\t'
+        language: pygrep
+        types: [text]
+        # Tab-separated data files are allowed.
+        exclude: \.(tsv|bed)$

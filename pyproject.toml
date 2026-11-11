@@ -1,0 +1,105 @@
+[project]
+name = "nnf-common"
+version = "0.1.0"
+description = "Notebooks and tutorials for the Novo Nordisk Foundation Center for Genomic Mechanisms of Disease, published as marimo WebAssembly pages."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "NNFC-GMD" },
+]
+
+# Not a published package: there is no build backend, and nothing installs this
+# project. pyproject.toml holds the pixi workspace and the tool configuration.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+
+# marimo installs a missing package through pixi, so the lockfile follows.
+[tool.marimo.package_management]
+manager = "pixi"
+
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["linux-64", "osx-64", "osx-arm64"]
+requires-pixi = ">=0.81"
+
+# The default environment is what a notebook may import: packages that also
+# exist in Pyodide, which is what runs the published pages in the browser.
+[tool.pixi.dependencies]
+python = "3.13.*"
+# The one marimo pin. The exported pages load this version's runtime, which is
+# Pyodide v314.0.0 for marimo 0.25.1.
+marimo = "==0.25.1"
+# Held at the versions that Pyodide build ships, so a notebook that runs here
+# runs the same way in the browser. Move them together with the marimo pin.
+numpy = "2.4.*"
+scipy = "1.17.*"
+pandas = "3.0.*"
+altair = "6.0.*"
+scikit-learn = "1.8.*"
+# website/build.py renders the landing page.
+jinja2 = ">=3.1"
+# `marimo export html-wasm --execute` runs the notebook in a uv environment.
+uv = ">=0.12,<0.13"
+
+[tool.pixi.feature.dev.dependencies]
+pytest = ">=8"
+pre-commit = ">=4"
+
+# Native-only packages for the prepare.py scripts, which turn raw public data
+# into the small files a notebook ships. None of these run in the browser.
+[tool.pixi.feature.prep.dependencies]
+scanpy = ">=1.11"
+anndata = ">=0.11"
+scikit-misc = ">=0.5"
+umap-learn = ">=0.5.7"
+
+# website/check_page.py drives the Google Chrome already on the machine, so no
+# browser is downloaded.
+[tool.pixi.feature.e2e.pypi-dependencies]
+playwright = ">=1.50"
+
+[tool.pixi.environments]
+default = { solve-group = "default" }
+dev = { features = ["dev"], solve-group = "default" }
+prep = { features = ["prep"], solve-group = "default" }
+e2e = { features = ["e2e"], solve-group = "default" }
+
+[tool.pixi.tasks]
+edit = { cmd = "marimo edit", description = "Open the marimo editor; pass a notebook path" }
+build = { cmd = "python website/build.py", description = "Export every notebook to WebAssembly and build the site in _site/" }
+serve = { cmd = "python -m http.server 8000 --directory _site", description = "Serve the built site at http://localhost:8000" }
+
+[tool.pixi.feature.dev.tasks]
+test = { cmd = "pytest", description = "Run the test suite" }
+# no-commit-to-branch always runs, and would fail whenever HEAD is main.
+lint = { cmd = "pre-commit run --all-files", env = { SKIP = "no-commit-to-branch" }, description = "Run every pre-commit hook on every tracked file" }
+install-hooks = { cmd = "pre-commit install", description = "Install the commit and push hooks in this clone" }
+
+[tool.pixi.feature.e2e.tasks]
+check-site = { cmd = "python website/check_site.py", description = "Open every page of the built site in headless Chrome and report errors" }
+
+[tool.pixi.feature.prep.tasks]
+prepare-scslide = { cmd = "python notebooks/scslide/prepare.py", description = "Rebuild the scSLIDE notebook's public/ files from the GEO download" }
+
+[tool.ruff]
+line-length = 88
+indent-width = 4
+
+[tool.ruff.lint]
+# Explicit on purpose: ruff 0.16 grew its default rule set from 59 to 413 rules,
+# and `select` replaces that set. W brings W191 (tab indentation).
+select = ["E", "W", "F", "I", "UP", "B"]
+# The formatter owns line length.
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# A marimo cell shows the value of its last expression, so a bare name there
+# is the output, not a useless expression.
+"notebooks/**/*.py" = ["B018"]
+
+[tool.ruff.format]
+indent-style = "space"
