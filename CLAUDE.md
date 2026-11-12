@@ -85,10 +85,13 @@ that only `prepare.py` scripts use; `e2e` adds playwright.
   differ and what was not tested.
 - **Nothing is taken from a paper's figures or text.** Figures are drawn from
   data, explanations are in our own words, and the DOI is linked.
-- **scSLIDE here is an independent implementation.** It was written from the
-  paper's Methods and the public documentation, without Seurat's source. That
-  independence is what gives the comparison with Seurat its meaning.
-  `validation/` runs Seurat as a black box and reads only its outputs.
+- **scSLIDE here is written from the paper, and says where it follows the
+  code instead.** The functions come from the paper's Methods and the public
+  documentation. Seurat's source (MIT) was read afterwards, to explain what a
+  black-box comparison could not. Two details now follow the code: where a
+  cell's surroundings are measured (`local_scales`) and that landmark cells do
+  not vote. Mark anything else taken from the source in the same three
+  places: the function's docstring, the page, and `compare.py`.
 - **Charts: Okabe-Ito for categories, cividis for continuous scales.** At most
   eight categories get a colour; with more, highlight one group against grey.
   The economist-design skill is not used in this repository.
@@ -135,18 +138,26 @@ that only `prepare.py` scripts use; `e2e` adds playwright.
     - The paper states no settings for the Perturb-seq dataset. Ours are the
       ones it gives for all its analyses, with the target gene as the PLS
       label. `manifest.json` records them.
-    - Landmark cells do not vote by default. The paper's Methods count every
-      cell, but Seurat's count table sums to five votes per non-landmark cell.
+    - Seurat's code and the paper's Methods differ in two places. The
+      notebook follows the code by default and has a switch for each. The
+      Methods read a cell's surroundings (the offset and the width of the
+      kernel) off its nearest landmarks; the code reads them off its nearest
+      cells. The Methods count every cell; the code leaves landmark cells out.
     - Correlation magnitudes depend strongly on the number of landmarks and
       of votes per cell. The pattern does not.
-    - Python matches Seurat on the whole guide-by-guide table, with one
-      exception: the RPS14/RPS15/RPS18 block, which swings with the balance
-      between the two views. Seurat's value is what Python gives at a view
-      weight near 0.45. The cause is not known; `compare.py` records the sweep.
+    - Handed the offsets and widths that Seurat computed, Python picks the
+      same five landmarks as Seurat for practically every cell. With its own
+      exact ones it agrees on fewer cells, because Seurat's neighbour search
+      is approximate. `compare.py` reports both.
+    - `seurat_reference.R` calls one internal function,
+      `Seurat:::FindModalityWeights`, to write those offsets and widths out.
+      An internal function can change between Seurat versions without notice.
     - `diffusion_map` links each sample to its nearest neighbours only. If
       the samples fall into separate groups, its components say which group a
       sample is in and nothing else.
-    - The PLS coordinates are baked into `cells.npz`. Changing a PLS choice
-      means running `prepare.py` again, then `compare.py`.
+    - The PLS coordinates are baked into `cells.npz`, and so are every
+      cell's surroundings (`scale_offset`, `scale_width`), measured on the
+      stored coordinates. Changing a PLS choice means running `prepare.py`
+      again, then `compare.py`.
 - The Seurat reference run uses an isolated R library in `.r-lib/`. Never
   install into the machine's own R library.

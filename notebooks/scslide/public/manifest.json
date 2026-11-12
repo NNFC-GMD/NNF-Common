@@ -74,8 +74,8 @@
     "files": [
         {
             "file": "cells.npz",
-            "sha256": "71e3cd415dc68dc6ec0895b2c58820dc9612d5fd65d43da3c13b654fe191ced2",
-            "bytes": 2797960
+            "sha256": "82aef5bcbcaf8a95254c4a91d8a5b306b02c8350beeea1fd998c7e8cab59963b",
+            "bytes": 3067513
         },
         {
             "file": "sgrna.csv",

@@ -148,3 +148,25 @@ def test_scslide_landmarks_in_the_file_are_the_ones_the_notebook_draws():
     )
 
     assert np.array_equal(drawn, np.flatnonzero(cells["landmark"]))
+
+
+def test_scslide_surroundings_in_the_file_are_the_ones_the_notebook_measures():
+    """Every cell's surroundings are stored by prepare.py; the notebook function must agree."""
+    import numpy as np
+    from conftest import NOTEBOOKS_DIR, load_module
+
+    scslide = load_module(NOTEBOOKS_DIR / "scslide" / "scslide.py", "notebook_scslide")
+    cells = np.load(NOTEBOOKS_DIR / "scslide" / "public" / "cells.npz")
+    manifest = json.loads(
+        (NOTEBOOKS_DIR / "scslide" / "public" / "manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    offsets, widths = scslide.local_scales(
+        [cells["pca"].astype(np.float32), cells["pls"].astype(np.float32)],
+        rank=manifest["parameters"]["bandwidth_rank"],
+    )
+
+    assert np.allclose(offsets, cells["scale_offset"], atol=1e-5)
+    assert np.allclose(widths, cells["scale_width"], atol=1e-5)
