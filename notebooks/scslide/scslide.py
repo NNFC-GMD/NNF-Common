@@ -26,7 +26,10 @@
 
 The method is from Jiang et al., "Reconstructing developmental and disease
 progression with sample-level embeddings" (Cell, doi 10.1016/j.cell.2026.10.018).
-Every function below is written from that paper's STAR Methods.
+The functions below are written from that paper's STAR Methods. Two details
+follow Seurat's source code instead, because the code and the Methods differ
+there: where a cell's surroundings are measured (``local_scales``) and whether
+landmark cells vote (``run_sample_level``).
 """
 
 import marimo
@@ -138,8 +141,60 @@ def nearest_rows(queries, references, k, chunk_size=1024):
 
 
 @app.function
+def local_scales(cell_views, rank=20, chunk_size=1024):
+    """Measure every cell's surroundings among all the cells, in each view.
+
+    The kernel of :func:`landmark_affinities` needs two numbers per cell and
+    view: a distance that still counts as "right next to the cell" (the
+    offset) and a distance over which the score fades (the width). The
+    paper's Methods take both from the cell's nearest landmarks. Seurat's
+    code (``FindModalityWeights``, called by ``FindmmNN``) takes them from
+    the cell's nearest cells, landmark or not. This function does what the
+    code does. It is one of the two details on this page that come from
+    Seurat's source and not from the paper.
+
+    In each view the rows are L2-normalised and every cell's ``rank``
+    nearest rows are found among all cells. The cell itself comes first, at
+    distance zero. The offset is the distance to the second row, the nearest
+    other cell. The width is the distance to the ``rank``-th row minus the
+    offset, so with a rank of 20 it reaches the 19th nearest other cell.
+
+    Parameters
+    ----------
+    cell_views : sequence of arrays of shape (n_cells, n_dims_view)
+    rank : int
+        Row whose distance sets the width; the cell itself is row one.
+    chunk_size : int
+        Cells handled at a time, which bounds the memory used.
+
+    Returns
+    -------
+    offsets : float array of shape (n_views, n_cells)
+    widths : float array of shape (n_views, n_cells)
+
+    Notes
+    -----
+    The search here is exact. Seurat's is approximate (Annoy), so its widths
+    are a little larger for the cells where the search missed a neighbour.
+    """
+    offsets = []
+    widths = []
+    for view in cell_views:
+        rows = l2_normalize(view)
+        _, distances = nearest_rows(rows, rows, rank, chunk_size=chunk_size)
+        offsets.append(distances[:, 1])
+        widths.append(distances[:, -1] - distances[:, 1])
+    return np.stack(offsets), np.stack(widths)
+
+
+@app.function
 def landmark_affinities(
-    cell_views, landmark_views, candidates=200, bandwidth_rank=20, chunk_size=512
+    cell_views,
+    landmark_views,
+    candidates=200,
+    bandwidth_rank=20,
+    scales=None,
+    chunk_size=512,
 ):
     """Score how close every cell is to its candidate landmarks, in each view.
 
@@ -148,11 +203,15 @@ def landmark_affinities(
     ``candidates`` nearest landmarks; the candidate pool of a cell is the
     union over views. The affinity of a cell to a landmark in one view is
 
-        exp(-max(d - d_first, 0) / (d_bandwidth - d_first))
+        exp(-max(d - offset, 0) / width)
 
-    where ``d`` is their Euclidean distance, ``d_first`` the cell's distance
-    to its nearest landmark and ``d_bandwidth`` its distance to its
-    ``bandwidth_rank``-th nearest landmark, all in that view.
+    where ``d`` is their Euclidean distance, and ``offset`` and ``width``
+    describe the cell's own surroundings in that view. The paper's Methods
+    read them off the landmarks: the offset is the cell's distance to its
+    nearest landmark, and the width its distance to its
+    ``bandwidth_rank``-th nearest landmark minus the offset. That is what
+    happens when ``scales`` is None. Seurat's code reads them off all cells:
+    pass the output of :func:`local_scales` to do the same.
 
     Parameters
     ----------
@@ -162,7 +221,11 @@ def landmark_affinities(
     candidates : int
         Nearest landmarks kept per cell and view.
     bandwidth_rank : int
-        Rank of the neighbour whose distance sets the width of the kernel.
+        Rank of the landmark whose distance sets the width of the kernel.
+        Not used when ``scales`` is given.
+    scales : pair of arrays of shape (n_views, n_cells), optional
+        ``(offsets, widths)``, one row per view, as :func:`local_scales`
+        returns them.
     chunk_size : int
         Cells handled at a time, which bounds the memory used.
 
@@ -195,16 +258,19 @@ def landmark_affinities(
     for view, (cell, landmark, (_, distances)) in enumerate(
         zip(cells, landmarks, nearest, strict=True)
     ):
-        first = distances[:, 0]
-        width = np.maximum(distances[:, bandwidth_rank - 1] - first, 1e-12)
+        if scales is None:
+            offset = distances[:, 0]
+            width = distances[:, bandwidth_rank - 1] - offset
+        else:
+            offset = np.asarray(scales[0][view], dtype=np.float32)
+            width = np.asarray(scales[1][view], dtype=np.float32)
+        width = np.maximum(width, 1e-12)
         for start in range(0, n_cells, chunk_size):
             stop = start + chunk_size
-            offsets = landmark[pool[start:stop]] - cell[start:stop, None, :]
-            distance = np.sqrt(np.einsum("ijk,ijk->ij", offsets, offsets))
-            beyond_first = np.maximum(distance - first[start:stop, None], 0.0)
-            affinities[view, start:stop] = np.exp(
-                -beyond_first / width[start:stop, None]
-            )
+            steps = landmark[pool[start:stop]] - cell[start:stop, None, :]
+            distance = np.sqrt(np.einsum("ijk,ijk->ij", steps, steps))
+            beyond = np.maximum(distance - offset[start:stop, None], 0.0)
+            affinities[view, start:stop] = np.exp(-beyond / width[start:stop, None])
     return pool, affinities, repeated
 
 
@@ -1041,17 +1107,33 @@ def _(target_genes):
         {"5 (paper)": 5, "20": 20}, value="5 (paper)", label="Landmarks per cell"
     )
     landmarks_vote = mo.ui.checkbox(False, label="Landmark cells vote too")
+    surroundings = mo.ui.dropdown(
+        {
+            "its nearest cells (Seurat's code)": "cells",
+            "its nearest landmarks (the paper's text)": "landmarks",
+        },
+        value="its nearest cells (Seurat's code)",
+        label="A cell's surroundings are",
+    )
     return (
         focus_gene,
         landmark_count,
         landmarks_vote,
+        surroundings,
         view_weight,
         votes_per_cell,
     )
 
 
 @app.cell(hide_code=True)
-def _(focus_gene, landmark_count, landmarks_vote, view_weight, votes_per_cell):
+def _(
+    focus_gene,
+    landmark_count,
+    landmarks_vote,
+    surroundings,
+    view_weight,
+    votes_per_cell,
+):
     mo.sidebar(
         [
             mo.md("### Settings for the real data"),
@@ -1059,11 +1141,14 @@ def _(focus_gene, landmark_count, landmarks_vote, view_weight, votes_per_cell):
             view_weight,
             landmark_count,
             votes_per_cell,
+            surroundings,
             landmarks_vote,
             mo.md(
                 """
                 The paper's settings are a weight of 0.5, 5,000 landmarks and
                 5 landmarks per cell. Each setting is explained at its step.
+                The last two are places where Seurat's code and the paper's
+                text differ. They start as the code has them.
                 """
             ),
         ]
@@ -1290,41 +1375,59 @@ def _():
 @app.cell(hide_code=True)
 def _(effect_size):
     _rng = np.random.default_rng(3)
-    _n = 600
+    _n, _n_genes = 600, 120
     _cell_type = _rng.integers(0, 2, _n)
     _treated = _rng.integers(0, 2, _n)
-    _features = _rng.normal(size=(_n, 12))
-    # Six genes mark the cell type; three other genes respond to the treatment.
-    _features[:, :6] += 2.5 * _cell_type[:, None]
-    _features[:, 8:11] += effect_size.value * _treated[:, None]
+    # A third thing going on, which nobody labelled: how far each cell has got
+    # through a program that cells of both types go through.
+    _program = _rng.normal(size=_n)
+    _n_type, _n_program, _n_treated = 12, 12, 4
+    _features = _rng.normal(size=(_n, _n_genes))
+    _features[:, 0:_n_type] += 3.0 * _cell_type[:, None]
+    _features[:, _n_type : _n_type + _n_program] += 1.2 * _program[:, None]
+    _features[:, 40 : 40 + _n_treated] += effect_size.value * _treated[:, None]
     _features = (_features - _features.mean(axis=0)) / _features.std(axis=0)
+    _jitter = _rng.uniform(size=_n)
 
-    _pca = np.linalg.svd(_features, full_matrices=False)
-    _pca = _pca[0][:, :2] * _pca[1][:2]
-    _pls = canonical_pls(_features, np.eye(2)[_treated], 2)["scores"]
+    # The unsupervised view: the directions of largest spread, in order.
+    _left, _weight, _ = np.linalg.svd(_features, full_matrices=False)
+    _unsupervised = _left[:, :30] * _weight[:30]
+    # The label-aware view: the directions that follow the treatment label.
+    _label_aware = canonical_pls(_features, np.eye(2)[_treated], 2)["scores"]
 
-    def _frame(coordinates, name):
-        return pd.DataFrame(coordinates, columns=["first", "second"]).assign(
-            view=name,
-            treatment=np.where(_treated == 1, "Treated", "Untreated"),
-            kind=np.where(_cell_type == 1, "Cell type 2", "Cell type 1"),
-        )
+    def _shows(axis, labels):
+        """How much of `labels` one direction accounts for, from 0 to 1."""
+        return float(np.corrcoef(axis, labels)[0, 1] ** 2)
 
-    def _explained(coordinates, labels):
-        return float(np.corrcoef(coordinates[:, 0], labels)[0, 1] ** 2)
+    _carried = [
+        _shows(_unsupervised[:, column], _treated)
+        for column in range(_unsupervised.shape[1])
+    ]
+    _buried = int(np.argmax(_carried)) + 1
+    _second_text = f"{_shows(_unsupervised[:, 1], _program):.0%} of it"
+    _buried_text = (
+        f"it is direction {_buried} of the unsupervised view here"
+        if max(_carried) >= 0.1
+        else "with the effect this small there is nothing much to find"
+    )
 
-    _both = pd.concat(
-        [
-            _frame(_pca, "Unsupervised view (PCA)"),
-            _frame(_pls, "Label-aware view (PLS)"),
-        ]
+    _frame = pd.DataFrame(
+        {
+            "position": np.concatenate([_unsupervised[:, 0], _label_aware[:, 0]]),
+            "jitter": np.tile(_jitter, 2),
+            "view": np.repeat(
+                ["Unsupervised view (PCA)", "Label-aware view (PLS)"], _n
+            ),
+            "treatment": np.tile(np.where(_treated == 1, "Treated", "Untreated"), 2),
+            "kind": np.tile(np.where(_cell_type == 1, "Cell type 2", "Cell type 1"), 2),
+        }
     )
     _picture = (
-        alt.Chart(_both)
-        .mark_point(size=28, opacity=0.6, filled=True)
+        alt.Chart(_frame)
+        .mark_point(size=34, opacity=0.65, filled=True)
         .encode(
-            x=alt.X("first:Q", title="First axis"),
-            y=alt.Y("second:Q", title="Second axis"),
+            x=alt.X("position:Q", title="Position along the first direction"),
+            y=alt.Y("jitter:Q", axis=None, title=None),
             color=alt.Color(
                 "treatment:N",
                 title="Treatment",
@@ -1332,63 +1435,106 @@ def _(effect_size):
             ),
             shape=alt.Shape("kind:N", title="Cell type"),
         )
-        .properties(width=290, height=260)
+        .properties(width=520, height=130)
         .facet(
-            column=alt.Column("view:N", title=None, sort=["Unsupervised view (PCA)"])
+            row=alt.Row(
+                "view:N",
+                title=None,
+                sort=["Unsupervised view (PCA)"],
+                header=alt.Header(
+                    labelAngle=0,
+                    labelOrient="top",
+                    labelAnchor="start",
+                    labelFontSize=13,
+                    labelFontWeight="bold",
+                    labelPadding=4,
+                ),
+            )
         )
-        .resolve_scale(x="independent", y="independent")
+        .resolve_scale(x="independent")
     )
     _table = pd.DataFrame(
         {
-            "First axis of": ["Unsupervised view (PCA)", "Label-aware view (PLS)"],
-            "explained by cell type": [
-                f"{_explained(_pca, _cell_type):.0%}",
-                f"{_explained(_pls, _cell_type):.0%}",
+            "The first direction of": [
+                "Unsupervised view (PCA)",
+                "Label-aware view (PLS)",
             ],
-            "explained by treatment": [
-                f"{_explained(_pca, _treated):.0%}",
-                f"{_explained(_pls, _treated):.0%}",
+            "shows this much of the cell type": [
+                f"{_shows(_unsupervised[:, 0], _cell_type):.0%}",
+                f"{_shows(_label_aware[:, 0], _cell_type):.0%}",
+            ],
+            "and this much of the treatment": [
+                f"{_shows(_unsupervised[:, 0], _treated):.0%}",
+                f"{_shows(_label_aware[:, 0], _treated):.0%}",
             ],
         }
     )
     mo.vstack(
         [
             mo.md(
-                """
+                f"""
                 ## Step 1. Two ways to look at a cell
 
                 Counting cells around landmarks needs a map on which cells that
-                are alike sit close together. Which map? scSLIDE uses two.
+                are alike sit close together. Which map? scSLIDE uses two,
+                because one map cannot show everything at once.
 
                 The **unsupervised view** is what every single-cell analysis
                 starts with: principal component analysis (PCA), or a reference
-                atlas. It finds the directions in which cells differ most. Those
-                are usually cell types, so it is good at keeping cell types apart.
-                A subtle effect of disease or treatment, carried by few genes,
-                can be invisible in it.
+                atlas. It looks for the directions in which cells differ most
+                and shows those first. Those are usually cell types. Anything
+                smaller has to queue behind them.
 
-                The **label-aware view** uses partial least squares (PLS). PLS is
-                told a label for every cell, such as *treated* or *untreated*,
-                and finds the directions that follow that label. It picks up
-                subtle effects, but it sees only what it was told to look for
-                and it blurs the cell types.
+                The **label-aware view** uses partial least squares (PLS). PLS
+                is told a label for every cell, here *treated* or *untreated*,
+                and looks only for directions that follow that label. It finds
+                a small effect at once. It also finds nothing else, because it
+                looks nowhere else.
 
-                In this toy, six genes mark the cell type and three other
-                genes respond to a treatment.
+                In this toy each cell has {_n_genes} genes and three things are
+                going on at once. {_n_type} genes mark the **cell type**, which
+                is the shape of each dot. {_n_program} more follow a **shared
+                program** that cells of both types go through. {_n_treated}
+                respond to a **treatment**, which is the colour. Only the
+                treatment is labelled.
                 """
             ),
             effect_size,
             _picture,
-            markdown_table(_table),
             mo.md(
                 """
-                The unsupervised view separates the two cell types (the two
-                shapes) and mixes the colours. The label-aware view pulls the
-                colours apart along its first axis. Slide the effect to zero:
-                the label-aware view then has nothing real to find, and the
-                little it shows is chance.
+                Each row is the leading direction of one view. A dot's position
+                from left to right is where that cell sits along it. The height
+                means nothing; it only keeps the dots from covering each other.
+                """
+            ),
+            markdown_table(_table),
+            mo.md(
+                f"""
+                The two rows do not separate the cells the same way, and that
+                is the point.
 
-                Neither view is enough alone, which is why scSLIDE keeps both.
+                The unsupervised view leads with the **cell type**: the shapes
+                split, and the colours stay mixed throughout. The treatment has
+                not vanished from it, it is queueing: the shared program takes
+                the second direction ({_second_text}), and the treatment comes
+                after ({_buried_text}). In real data, where thousands of genes and
+                many kinds of cell compete for the first directions, a small
+                effect can queue well past the last direction anyone keeps.
+
+                The label-aware view leads with the **treatment**: the colours
+                split, and the shapes mix. It was handed the labels, so this is
+                the one thing it looks for.
+
+                Now slide the effect to zero. There is nothing left to find,
+                and yet the label-aware view still spreads the colours a
+                little, and its number in the table stays above zero. Among
+                {_n_genes} genes, some will follow the labels by luck. That is
+                why this page later leans on a check that the method was never
+                told about.
+
+                Neither view is enough on its own, which is why scSLIDE keeps
+                both and joins them in the next step.
                 """
             ),
         ]
@@ -1474,9 +1620,18 @@ def _(
 
 
 @app.cell(hide_code=True)
-def _(cells, landmark_count, views):
+def _(cells, landmark_count, surroundings, views):
     landmark_rows = sample_landmarks(cells["leverage"], landmark_count.value, seed=0)
-    affinity = landmark_affinities(views, [view[landmark_rows] for view in views])
+    # Every cell's surroundings among all cells do not depend on the landmarks,
+    # so prepare.py measured them once, with local_scales, and stored them.
+    _scales = (
+        (cells["scale_offset"], cells["scale_width"])
+        if surroundings.value == "cells"
+        else None
+    )
+    affinity = landmark_affinities(
+        views, [view[landmark_rows] for view in views], scales=_scales
+    )
     return affinity, landmark_rows
 
 
@@ -1537,10 +1692,10 @@ def _(current, pca_only, pls_only, view_weight, votes_per_cell):
 
                 The idea is to ask each view the same question: *how close is
                 this cell to that landmark?* Each view answers with a score
-                between 0 and 1. The score is 1 for the cell's nearest landmark
-                and fades with distance, judged against the cell's own
-                surroundings in that view. The two scores are then averaged.
-                scSLIDE fixes the weights at one half each.
+                between 0 and 1. The score is highest for the landmarks
+                nearest to the cell and fades with distance, judged against
+                the cell's own surroundings in that view. The two scores are
+                then averaged. scSLIDE fixes the weights at one half each.
                 """
             ),
             mo.accordion(
@@ -1548,12 +1703,27 @@ def _(current, pca_only, pls_only, view_weight, votes_per_cell):
                     "The formula, for the curious": mo.md(
                         r"""
                         In one view, let $d$ be the distance from a cell to a
-                        landmark, $d_1$ the distance to its nearest landmark and
-                        $d_{20}$ the distance to its 20th nearest. The score is
+                        landmark. The score is
 
-                        $$\theta = \exp\!\left(-\,\frac{\max(d - d_1,\,0)}{d_{20} - d_1}\right)$$
+                        $$\theta = \exp\!\left(-\,\frac{\max(d - a,\,0)}{w}\right)$$
 
-                        and the joint score is
+                        The two numbers $a$ and $w$ describe the cell's
+                        surroundings in that view. A landmark closer than $a$
+                        counts as right next to the cell and scores 1. Beyond
+                        $a$ the score fades, and $w$ says over what distance.
+
+                        The paper's text reads them off the landmarks: $a$ is
+                        the distance to the cell's nearest landmark, and
+                        $a + w$ the distance to its 20th nearest. Seurat's code
+                        reads them off all the cells, landmark or not: $a$ is
+                        the distance to the nearest other cell, and $a + w$ the
+                        distance to the 19th nearest. This page follows the
+                        code. The setting *A cell's surroundings are*, in the
+                        left panel, switches to the text. The section *Does
+                        the Python version match Seurat?* shows what the choice
+                        changes.
+
+                        The joint score is
                         $0.5\,\theta_{\text{unsupervised}} + 0.5\,\theta_{\text{label-aware}}$.
                         Distances are measured after scaling every cell's
                         coordinates to length one. Each cell keeps the landmarks
@@ -1775,13 +1945,13 @@ def _(
                         f"""
                         A landmark is itself a cell, and the landmark nearest
                         to it is itself. The paper's Methods count every cell.
-                        Seurat's own table tells a different story: its total is
+                        Seurat's code leaves the landmark cells out, on purpose.
+                        Its table shows it: the total is
                         {validation["seurat_count_total"]:,}, which is five votes
                         for each of the {validation["cells"] - validation["landmarks"]:,}
-                        cells that are not landmarks. So in Seurat the landmark
-                        cells do not vote, and we do the same by default. The
-                        tick box in the left panel lets them vote. It changes
-                        little.
+                        cells that are not landmarks. We do the same by default.
+                        The tick box in the left panel lets them vote. It
+                        changes little.
                         """
                     ),
                     "Does the leverage score matter here?": mo.md(
@@ -2912,24 +3082,41 @@ def _(validation):
         }
     )
     _swap = validation["with_seurat_landmark_cells"]
-    _python = _rows["Python"]["RPS14/15/18 cross r"]
-    _seurat = [
-        row["RPS14/15/18 cross r"]
-        for name, row in _rows.items()
-        if name.startswith("Seurat")
-    ]
-    _sweep = pd.DataFrame(validation["weight_sweep_with_seurat_landmark_cells"])
-    _sweep_table = pd.DataFrame(
+    _rules = {row["rule"]: row for row in validation["rules_on_seurat_coordinates"]}
+    _text = _rules["paper_text"]
+    _code = _rules["code_exact"]
+    _given = _rules["code_seurat_values"]
+    _rule_table = pd.DataFrame(
         {
-            "Weight of the label-aware view, in Python": [
-                f"{value:.2f}" for value in _sweep["weight"]
+            "Python's rule for a cell's surroundings": [
+                "The paper's text: its nearest landmarks",
+                "Seurat's code: its nearest cells",
+                "Seurat's code, with the numbers Seurat computed",
+                "Seurat itself",
             ],
-            "RPS14, RPS15, RPS18": [f"{value:.2f}" for value in _sweep["ribosomal"]],
+            "Cells with the same five landmarks as in Seurat": [
+                f"{_text['same_five']:.0%}",
+                f"{_code['same_five']:.0%}",
+                f"{_given['same_five']:.2%}",
+                "",
+            ],
             "Whole table, correlation with Seurat": [
-                f"{value:.3f}" for value in _sweep["r_with_seurat"]
+                f"{_text['r_with_seurat']:.4f}",
+                f"{_code['r_with_seurat']:.4f}",
+                f"{_given['r_with_seurat']:.4f}",
+                "",
+            ],
+            "RPS14, RPS15, RPS18": [
+                f"{_text['ribosomal']:.2f}",
+                f"{_code['ribosomal']:.2f}",
+                f"{_given['ribosomal']:.2f}",
+                f"{validation['seurat_ribosomal']:.2f}",
             ],
         }
     )
+    _search = validation["approximate_search"]
+    _missed = " and ".join(str(count) for count in _given["cells_differing"])
+    _first_version = _rows["Python, following the paper's text"]
     mo.vstack(
         [
             mo.md(
@@ -2937,7 +3124,7 @@ def _(validation):
                 ## Does the Python version match Seurat?
 
                 The code on this page was written from the Methods section of
-                the paper, not copied from Seurat. To check it, we ran
+                the paper. To check it, we ran
                 Seurat {validation["seurat_version"]} itself on the same cells
                 with the same settings and compared the end product: the table
                 of guide against guide, 138 by 138.
@@ -2954,44 +3141,70 @@ def _(validation):
                 Python differs from Seurat about as much as Seurat differs
                 from itself.
 
-                Two further checks say where the small remaining difference
-                comes from. The cell coordinates agree exactly: both the
-                unsupervised and the label-aware view span the same directions
-                in Python and in Seurat (agreement
+                The cell coordinates agree: both the unsupervised and the
+                label-aware view span the same directions in Python and in
+                Seurat (agreement
                 {validation["subspace_agreement"]["pca"]:.3f} and
                 {validation["subspace_agreement"]["pls"]:.3f}, where 1 is
                 identical). And when Python is given Seurat's own choice of
                 landmark cells, its table correlates
-                {_swap["python_coordinates_landmarks_do_not_vote"]:.3f} with
-                Seurat's. So most of what is left is the random draw of
-                landmarks.
+                {_swap["python_coordinates"]:.3f} with Seurat's. So nearly all
+                of what is left is the random draw of landmarks.
+
+                ### Where Seurat's code and the paper's text part ways
+
+                Our first version followed the paper's text to the letter. Its
+                table correlated
+                {validation["paper_text_vs_seurat"]["mean"]:.3f} with Seurat's,
+                a little under the yardstick, and one number stood out. The
+                three ribosomal genes RPS14, RPS15 and RPS18 correlated
+                {_first_version["RPS14/15/18 cross r"]:.2f} with one another in
+                Python and {validation["seurat_ribosomal"]:.2f} in Seurat.
+                Seurat's source code is open, so we read it. It differs from
+                the text in two places.
+
+                **1. What a cell's surroundings are.** Step 2 judges how near
+                a landmark is against the cell's own surroundings. In the
+                text, the surroundings are the cell's nearest *landmarks*:
+                the nearest one and the 20th nearest. In the code, they are
+                the cell's nearest *cells*, landmark or not: the nearest one
+                and the 19th nearest. There are more cells than landmarks, so
+                they lie closer, and the code's score fades over a shorter
+                distance: {validation["code_width_over_text_width"]:.2f}
+                times the text's, for a typical cell.
+
+                **2. Who votes.** The text counts every cell of a sample. The
+                code leaves the landmark cells out, on purpose.
+
+                This page follows the code in both, because the code is what
+                Seurat's users run. The left panel has a switch for each.
+
+                Are these two points the whole story? To find out, we gave
+                Python Seurat's own coordinates and landmark cells, so that
+                only the rule could differ. Then we compared, cell by cell,
+                the five landmarks each cell votes for.
+                """
+            ),
+            markdown_table(_rule_table),
+            mo.md(
+                f"""
+                The last step, from {_code["same_five"]:.0%} to
+                {_given["same_five"]:.2%}, is not a third difference in the
+                rule. Seurat looks for a cell's nearest cells with a fast
+                search that may miss one now and then. That makes
+                {_search["width_larger"]:.0%} of the fading distances a little
+                larger than the exact ones, by
+                {_search["median_factor_where_larger"] - 1:.1%} at the median.
+                Given the numbers Seurat itself computed, Python and Seurat
+                disagree on {_missed} of the {validation["voting_cells"]:,}
+                voting cells in the two runs.
 
                 The numbers below are from these runs, at the paper's settings.
                 """
             ),
             markdown_table(_table),
             mo.md(
-                f"""
-                **One number does not match.** The three ribosomal genes
-                correlate {_python:.2f} with one another in Python and
-                {min(_seurat):.2f} to {max(_seurat):.2f} in Seurat, and giving
-                Python Seurat's landmark cells does not close the gap. This
-                number turns out to be the most delicate one on the page. It
-                is carried by the unsupervised view and erased by the
-                label-aware view, so it swings with the balance between them:
                 """
-            ),
-            markdown_table(_sweep_table),
-            mo.md(
-                """
-                Seurat's value is what Python gives at a weight of about 0.45
-                rather than 0.50. In other words, Seurat's way of joining the
-                views lets the unsupervised view count a little more than a
-                plain average of the two scores does. We did not find out why:
-                the Methods describe a plain average, and we did not read
-                Seurat's source code. For the screen as a whole the difference
-                is small, as the last column shows.
-
                 The scripts for this check are in the repository, under
                 `validation/scslide/`.
                 """
@@ -3108,7 +3321,9 @@ def _(manifest):
                 the label for the label-aware view.
 
                 **Code.** Written for this page from the paper's Methods, under
-                the MIT licence. The charts use the Okabe-Ito colours and the
+                the MIT licence. Two details follow Seurat's source code
+                instead; the section *Does the Python version match Seurat?*
+                names them. The charts use the Okabe-Ito colours and the
                 cividis scale, which stay readable with colour-blindness.
                 """
             ),

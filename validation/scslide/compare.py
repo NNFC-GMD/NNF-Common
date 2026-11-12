@@ -1,17 +1,27 @@
 """Compare the Python scSLIDE results with the Seurat 6 reference run.
 
-Seurat is treated as a black box: only what ``seurat_reference.R`` writes is
-read. The comparison is made on the 138 x 138 matrix of correlations between
-guide RNAs, the end product of the Perturb-seq analysis.
+The comparison is made on the 138 x 138 matrix of correlations between guide
+RNAs, the end product of the Perturb-seq analysis, and cell by cell on the
+five landmarks that each cell votes for.
 
-Three questions, in order:
+Four questions, in order:
 
 1. How much do two runs of the *same* implementation differ, when only the
    random draw of landmark cells changes? That is the noise floor.
 2. How close is Python to Seurat, judged against that floor?
-3. If they differ, where? Seurat's own cell coordinates and landmark cells are
-   fed through the Python sample-level functions, which separates a difference
-   in the coordinates from a difference in the later steps.
+3. Does a difference sit in the cell coordinates or in the later steps?
+   Seurat's own cell coordinates and landmark cells are fed through the
+   Python sample-level functions.
+4. Which rule gives every cell the landmarks Seurat gives it? The paper's
+   Methods and Seurat's code describe a cell's surroundings differently (see
+   ``local_scales`` in the notebook). Both rules are run on Seurat's own
+   coordinates and landmark cells. So is the code's rule with the numbers
+   Seurat itself computed, which differ from the exact ones because Seurat
+   searches for neighbours approximately.
+
+The first comparison treated Seurat as a black box and left one difference
+unexplained. Seurat's source (MIT licence) was then read to explain it;
+question 4 is the result.
 
 Run it after ``prepare.py`` and at least two reference runs:
 
@@ -34,6 +44,9 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 NOTEBOOK_DIR = ROOT / "notebooks" / "scslide"
 
+# Two distances closer than this are taken to be the same distance.
+SAME_DISTANCE = 1e-5
+
 
 def load_notebook_functions():
     """Import the notebook file, to use the method functions defined in it."""
@@ -46,10 +59,16 @@ def load_notebook_functions():
     return module
 
 
-def guide_correlation(
-    methods, views, landmark_rows, guide, n_guides, count_landmark_cells=True
+def sample_level(
+    methods,
+    views,
+    landmark_rows,
+    guide,
+    n_guides,
+    scales=None,
+    count_landmark_cells=False,
 ):
-    """Run the sample-level steps and return the guide-by-guide correlation matrix.
+    """Run the sample-level steps of the notebook.
 
     Parameters
     ----------
@@ -58,28 +77,36 @@ def guide_correlation(
     views : list of arrays of shape (n_cells, n_dims)
         The two cell embeddings.
     landmark_rows : int array
-        Rows of the landmark cells.
+        Rows of the landmark cells. A landmark is numbered by its place here.
     guide : int array of shape (n_cells,)
         Guide of every cell.
     n_guides : int
+    scales : pair of arrays of shape (2, n_cells), optional
+        Every cell's surroundings, as ``local_scales`` returns them: the rule
+        of Seurat's code. When None the surroundings are read off the
+        landmarks: the rule of the paper's Methods.
     count_landmark_cells : bool
-        When False, landmark cells do not vote. The reference's count table
-        sums to five times the number of non-landmark cells, so this is what
-        Seurat does; the paper's Methods count every cell.
+        Whether landmark cells vote. In Seurat they do not; the paper's
+        Methods count every cell.
+
+    Returns
+    -------
+    dict
+        What ``run_sample_level`` returns: ``landmarks``, ``counts``,
+        ``residuals`` and ``correlation``.
     """
     pool, affinities, repeated = methods.landmark_affinities(
-        views, [view[landmark_rows] for view in views]
+        views, [view[landmark_rows] for view in views], scales=scales
     )
-    landmarks, _ = methods.top_landmarks(
-        pool, affinities, repeated, weights=(0.5, 0.5), k=5
+    return methods.run_sample_level(
+        pool,
+        affinities,
+        repeated,
+        guide,
+        n_guides,
+        landmark_rows,
+        landmarks_vote=count_landmark_cells,
     )
-    voters = np.ones(len(guide), dtype=bool)
-    if not count_landmark_cells:
-        voters[landmark_rows] = False
-    counts = methods.landmark_counts(
-        landmarks[voters], guide[voters], len(landmark_rows), n_guides
-    )
-    return methods.column_correlation(methods.chi_square_residuals(counts))
 
 
 def describe(methods, correlation, guides):
@@ -135,6 +162,81 @@ def subspace_agreement(first, second):
     return float(np.linalg.svd(first_basis.T @ second_basis, compute_uv=False).mean())
 
 
+def same_landmarks(ours, theirs):
+    """Fraction of rows that hold the same landmarks, in any order."""
+    return float((np.sort(ours, axis=1) == np.sort(theirs, axis=1)).all(axis=1).mean())
+
+
+def read_reference(reference_dir, seed, kept_barcodes, guide_order):
+    """Read what one reference run wrote, with its cells in the Python order.
+
+    Parameters
+    ----------
+    reference_dir : pathlib.Path
+        Folder holding the outputs of ``seurat_reference.R``.
+    seed : int
+    kept_barcodes : list of str
+        Cell barcodes in the order of ``cells.npz``.
+    guide_order : sequence of str
+        Seurat's guide identifiers, in the order of the Python guide table.
+
+    Returns
+    -------
+    dict
+        ``cells`` (table), ``views`` (two arrays), ``landmark_rows`` (row of
+        Seurat's landmark number 0, 1, ...), ``neighbours`` (n_cells, 20;
+        Seurat's landmark numbers, best first), ``counts`` (landmark by
+        guide), ``scales`` (offsets and widths, each (2, n_cells)) and
+        ``correlation`` (guide by guide).
+    """
+    tag = f"seed{seed}"
+    cells = (
+        pd.read_csv(reference_dir / f"cells_{tag}.csv.gz")
+        .set_index("cell_barcode")
+        .loc[kept_barcodes]
+    )
+    views = [
+        cells[[name for name in cells.columns if name.startswith(prefix)]].to_numpy(
+            np.float32
+        )
+        for prefix in ("PC_", "pPLS_")
+    ]
+    row_of = pd.Series(np.arange(len(cells)), index=cells.index)
+    landmark_order = (reference_dir / f"landmark_order_{tag}.txt").read_text().split()
+    landmark_rows = row_of.loc[landmark_order].to_numpy()
+
+    neighbours = (
+        pd.read_csv(reference_dir / f"neighbours_{tag}.csv.gz")
+        .set_index("cell_barcode")
+        .loc[kept_barcodes]
+    )
+    index_columns = [name for name in neighbours.columns if name.startswith("index")]
+    scales = (
+        pd.read_csv(reference_dir / f"scales_{tag}.csv.gz")
+        .set_index("cell_barcode")
+        .loc[kept_barcodes]
+    )
+    return {
+        "cells": cells,
+        "views": views,
+        "landmark_rows": landmark_rows,
+        # R counts from one.
+        "neighbours": neighbours[index_columns].to_numpy(np.int64) - 1,
+        "counts": pd.read_csv(
+            reference_dir / f"landmark_counts_{tag}.csv.gz", index_col=0
+        )[list(guide_order)].to_numpy(),
+        "scales": (
+            scales[["offset_pca", "offset_pls"]].to_numpy(np.float32).T,
+            scales[["width_pca", "width_pls"]].to_numpy(np.float32).T,
+        ),
+        "correlation": pd.read_csv(
+            reference_dir / f"correlation_{tag}.csv", index_col=0
+        )
+        .loc[guide_order, guide_order]
+        .to_numpy(),
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     """Print the comparison and save its numbers. Returns the process exit code."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -159,10 +261,14 @@ def main(argv: list[str] | None = None) -> int:
     guide = data["guide"].astype(int)
     leverage = data["leverage"]
     n_landmarks = int(data["landmark"].sum())
+    n_guides = len(guides)
+    # The notebook's default: every cell's surroundings among all cells, as in
+    # Seurat's code, and no votes from landmark cells, again as in Seurat.
+    scales = (data["scale_offset"], data["scale_width"])
 
     # Seurat's guides, reordered to the Python guide order.
     reference_guides = pd.read_csv(args.reference_dir / "guides.csv")
-    order = (
+    guide_order = (
         reference_guides.set_index("guide_identity")
         .loc[guides["guide_identity"], "id"]
         .to_numpy()
@@ -175,14 +281,14 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(
             f"need two reference runs in {args.reference_dir}, found {len(seeds)}"
         )
-    seurat = {
-        seed: pd.read_csv(
-            args.reference_dir / f"correlation_seed{seed}.csv", index_col=0
-        )
-        .loc[order, order]
-        .to_numpy()
+    kept_barcodes = (
+        (ROOT / "data" / "GSE132080" / "kept_barcodes.txt").read_text().split()
+    )
+    reference = {
+        seed: read_reference(args.reference_dir, seed, kept_barcodes, guide_order)
         for seed in seeds
     }
+    seurat = {seed: run["correlation"] for seed, run in reference.items()}
     summary = dict(
         line.split(" ", 1)
         for line in (args.reference_dir / f"summary_seed{seeds[0]}.txt")
@@ -190,21 +296,25 @@ def main(argv: list[str] | None = None) -> int:
         .splitlines()
     )
 
-    # The notebook's default: landmark cells do not vote, as in Seurat's count table.
+    # --- 1 and 2: the end product, at different draws of landmarks ----------
     python = {}
+    paper_text = {}
     for seed in (0, 1, 2):
         rows = methods.sample_landmarks(leverage, n_landmarks, seed=seed)
-        python[seed] = guide_correlation(
-            methods, views, rows, guide, len(guides), count_landmark_cells=False
-        )
+        python[seed] = sample_level(
+            methods, views, rows, guide, n_guides, scales=scales
+        )["correlation"]
+        paper_text[seed] = sample_level(methods, views, rows, guide, n_guides)[
+            "correlation"
+        ]
 
     # Does it matter that landmarks are drawn by leverage score rather than at random?
     uniform_rows = np.sort(
         np.random.default_rng(0).choice(len(guide), n_landmarks, replace=False)
     )
-    uniform = guide_correlation(
-        methods, views, uniform_rows, guide, len(guides), count_landmark_cells=False
-    )
+    uniform = sample_level(
+        methods, views, uniform_rows, guide, n_guides, scales=scales
+    )["correlation"]
     uniform_vs_leverage = upper_triangle_r(uniform, python[0])
 
     def pairwise(runs):
@@ -215,13 +325,24 @@ def main(argv: list[str] | None = None) -> int:
             for b in keys[index + 1 :]
         ]
 
+    def against_seurat(runs):
+        return [
+            upper_triangle_r(run, other)
+            for other in seurat.values()
+            for run in runs.values()
+        ]
+
+    def spread(values):
+        return {
+            "mean": round(float(np.mean(values)), 4),
+            "min": round(min(values), 4),
+            "max": round(max(values), 4),
+        }
+
     python_floor = pairwise(python)
     seurat_floor = pairwise(seurat)
-    across = [
-        upper_triangle_r(run, reference)
-        for reference in seurat.values()
-        for run in python.values()
-    ]
+    across = against_seurat(python)
+    across_text = against_seurat(paper_text)
     print("1. Noise floor: the same implementation, a different draw of landmarks")
     print("   Python vs Python:", ", ".join(f"{value:.3f}" for value in python_floor))
     print("   Seurat vs Seurat:", ", ".join(f"{value:.3f}" for value in seurat_floor))
@@ -230,112 +351,189 @@ def main(argv: list[str] | None = None) -> int:
         f"   r = {np.mean(across):.3f} (range {min(across):.3f} to {max(across):.3f} "
         f"over {len(across)} pairs of runs)"
     )
+    print(
+        f"   with the rule of the paper's text: r = {np.mean(across_text):.3f} "
+        f"(range {min(across_text):.3f} to {max(across_text):.3f})"
+    )
+    print(
+        f"   Landmarks drawn at random instead of by leverage: r = {uniform_vs_leverage:.3f}"
+    )
 
-    table = {"Python": describe(methods, python[0], guides)}
+    table = {
+        "Python": describe(methods, python[0], guides),
+        "Python, following the paper's text": describe(methods, paper_text[0], guides),
+    }
     table.update(
         {
             f"Seurat, seed {seed}": describe(methods, run, guides)
             for seed, run in seurat.items()
         }
     )
-    print("\n   What each matrix says:")
-    print(pd.DataFrame(table).round(3).to_string())
 
-    print(
-        f"\n   Landmarks drawn at random instead of by leverage: r = {uniform_vs_leverage:.3f}"
-    )
-
-    print("\n3. Where the difference comes from")
-    seed = seeds[0]
-    kept_barcodes = (
-        (ROOT / "data" / "GSE132080" / "kept_barcodes.txt").read_text().split()
-    )
-    cells = (
-        pd.read_csv(args.reference_dir / f"cells_seed{seed}.csv.gz")
-        .set_index("cell_barcode")
-        .loc[kept_barcodes]
-    )
+    # --- 3: coordinates or later steps? --------------------------------------
+    print("\n3. Seurat's landmark cells in the Python pipeline")
+    first = reference[seeds[0]]
     reference_guide = (
         reference_guides.set_index("id")
-        .loc[cells["guide"], "guide_identity"]
+        .loc[first["cells"]["guide"], "guide_identity"]
         .map(guides.set_index("guide_identity")["guide"])
         .to_numpy()
     )
     if not np.array_equal(reference_guide, guide):
         raise ValueError("the reference cells do not carry the guides of cells.npz")
-    reference_views = [
-        cells[[name for name in cells.columns if name.startswith("PC_")]].to_numpy(
-            np.float32
-        ),
-        cells[[name for name in cells.columns if name.startswith("pPLS_")]].to_numpy(
-            np.float32
-        ),
-    ]
-    reference_landmarks = np.flatnonzero(cells["landmark"].to_numpy())
     agreement = {
-        "pca": subspace_agreement(views[0], reference_views[0]),
-        "pls": subspace_agreement(views[1], reference_views[1]),
+        "pca": subspace_agreement(views[0], first["views"][0]),
+        "pls": subspace_agreement(views[1], first["views"][1]),
     }
     print(
         "   Same directions? mean canonical correlation, Python vs Seurat: "
         f"PCA {agreement['pca']:.3f}, PLS {agreement['pls']:.3f}"
     )
-    experiments = {
-        "seurat_coordinates_landmarks_do_not_vote": (reference_views, False),
-        "seurat_coordinates_every_cell_votes": (reference_views, True),
-        "python_coordinates_landmarks_do_not_vote": (views, False),
-        "python_coordinates_every_cell_votes": (views, True),
-    }
-    transplants = {}
-    for name, (chosen_views, count_landmark_cells) in experiments.items():
-        result = guide_correlation(
-            methods,
-            chosen_views,
-            reference_landmarks,
-            guide,
-            len(guides),
-            count_landmark_cells,
-        )
-        transplants[name] = upper_triangle_r(result, seurat[seed])
-        print(
-            f"   Seurat's landmark cells, {name.replace('_', ' ')}: r = {transplants[name]:.3f}"
-        )
-        if name == "python_coordinates_landmarks_do_not_vote":
+    transplants = {"python_coordinates": [], "python_coordinates_every_cell_votes": []}
+    for seed, run in reference.items():
+        result = sample_level(
+            methods, views, run["landmark_rows"], guide, n_guides, scales=scales
+        )["correlation"]
+        transplants["python_coordinates"].append(upper_triangle_r(result, seurat[seed]))
+        if seed == seeds[0]:
             # The Python pipeline, changed in one thing only: which cells are landmarks.
             table["Python, with Seurat's landmark cells"] = describe(
                 methods, result, guides
             )
-    print("\n   The same summary, with Seurat's landmark cells in the Python pipeline:")
+        result = sample_level(
+            methods,
+            views,
+            run["landmark_rows"],
+            guide,
+            n_guides,
+            scales=scales,
+            count_landmark_cells=True,
+        )["correlation"]
+        transplants["python_coordinates_every_cell_votes"].append(
+            upper_triangle_r(result, seurat[seed])
+        )
+    transplants = {name: float(np.mean(values)) for name, values in transplants.items()}
+    for name, value in transplants.items():
+        print(f"   {name.replace('_', ' ')}: r = {value:.4f}")
+    print("\n   What each matrix says:")
     print(pd.DataFrame(table).round(3).to_string())
 
-    # The one block that differs, RPS14/15/18, sits on a knife edge between the
-    # two views. Sweep the view weight, with Seurat's landmark cells, to show it.
-    pool, affinities, repeated = methods.landmark_affinities(
-        views, [view[reference_landmarks] for view in views]
-    )
-    sweep = []
-    print("\n4. The weight of the label-aware view, with Seurat's landmark cells")
-    for weight in (0.40, 0.45, 0.50, 0.55, 0.60):
-        result = methods.run_sample_level(
-            pool,
-            affinities,
-            repeated,
-            guide,
-            len(guides),
-            reference_landmarks,
-            weights=(1.0 - weight, weight),
-        )["correlation"]
-        row = {
-            "weight": weight,
-            "r_with_seurat": round(upper_triangle_r(result, seurat[seed]), 4),
-            "ribosomal": round(
-                describe(methods, result, guides)["RPS14/15/18 cross r"], 4
-            ),
-        }
-        sweep.append(row)
-        print(
-            f"   weight {weight:.2f}: r with Seurat {row['r_with_seurat']:.3f}, RPS14/15/18 {row['ribosomal']:.3f}"
+    # --- 4: which rule gives Seurat's landmarks, cell by cell? --------------
+    print("\n4. Cell by cell, on Seurat's own coordinates and landmark cells")
+    rules = {
+        "paper_text": "the paper's text: nearest landmarks",
+        "code_exact": "Seurat's code: nearest cells, exact search",
+        "code_seurat_values": "Seurat's code, with Seurat's own numbers",
+    }
+    by_rule = {name: [] for name in rules}
+    table_follows = []
+    search = {"width_larger": [], "width_same": [], "offset_same": [], "ratio": []}
+    for seed, run in reference.items():
+        voters = np.ones(len(guide), dtype=bool)
+        voters[run["landmark_rows"]] = False
+        theirs = run["neighbours"][voters][:, :5]
+        # Is Seurat's count table what its own stored neighbours imply, once
+        # the landmark cells are left out?
+        implied = methods.landmark_counts(
+            theirs, guide[voters], len(run["landmark_rows"]), n_guides
         )
+        table_follows.append(bool(np.array_equal(implied, run["counts"])))
+
+        exact = methods.local_scales(run["views"])
+        for name, chosen in (
+            ("paper_text", None),
+            ("code_exact", exact),
+            ("code_seurat_values", run["scales"]),
+        ):
+            result = sample_level(
+                methods,
+                run["views"],
+                run["landmark_rows"],
+                guide,
+                n_guides,
+                scales=chosen,
+            )
+            ours = result["landmarks"][voters]
+            by_rule[name].append(
+                {
+                    "same_five": same_landmarks(ours, theirs),
+                    "cells_differing": int(
+                        (np.sort(ours, axis=1) != np.sort(theirs, axis=1))
+                        .any(axis=1)
+                        .sum()
+                    ),
+                    "votes_moved": int(
+                        np.abs(result["counts"] - run["counts"]).sum() // 2
+                    ),
+                    "r_with_seurat": upper_triangle_r(
+                        result["correlation"], seurat[seed]
+                    ),
+                    "ribosomal": describe(methods, result["correlation"], guides)[
+                        "RPS14/15/18 cross r"
+                    ],
+                }
+            )
+        # What does the approximate search do to the widths and offsets?
+        width_gap = run["scales"][1] - exact[1]
+        offset_gap = run["scales"][0] - exact[0]
+        search["width_larger"].append(float((width_gap > SAME_DISTANCE).mean()))
+        search["width_same"].append(float((np.abs(width_gap) <= SAME_DISTANCE).mean()))
+        search["offset_same"].append(
+            float((np.abs(offset_gap) <= SAME_DISTANCE).mean())
+        )
+        search["ratio"].append(
+            float(np.median((run["scales"][1] / exact[1])[width_gap > SAME_DISTANCE]))
+        )
+    rule_rows = []
+    for name, label in rules.items():
+        row = {
+            "rule": name,
+            "same_five": float(np.mean([run["same_five"] for run in by_rule[name]])),
+            "cells_differing": [run["cells_differing"] for run in by_rule[name]],
+            "votes_moved": float(
+                np.mean([run["votes_moved"] for run in by_rule[name]])
+            ),
+            "r_with_seurat": float(
+                np.mean([run["r_with_seurat"] for run in by_rule[name]])
+            ),
+            "ribosomal": float(np.mean([run["ribosomal"] for run in by_rule[name]])),
+        }
+        rule_rows.append(row)
+        print(
+            f"   {label:<44} same five landmarks {row['same_five']:.4f} | "
+            f"votes placed differently {row['votes_moved']:>7.0f} | "
+            f"r with Seurat {row['r_with_seurat']:.5f} | RPS14/15/18 {row['ribosomal']:.3f}"
+        )
+    seurat_ribosomal = float(
+        np.mean(
+            [
+                describe(methods, run, guides)["RPS14/15/18 cross r"]
+                for run in seurat.values()
+            ]
+        )
+    )
+    print(f"   {'Seurat itself':<44} RPS14/15/18 {seurat_ribosomal:.3f}")
+    print(
+        "   Seurat's count table follows from its stored neighbours, landmark "
+        f"cells left out: {all(table_follows)}"
+    )
+    print(
+        "   Seurat's approximate search: width larger than the exact one for "
+        f"{np.mean(search['width_larger']):.3f} of cells and views (by a median factor "
+        f"of {np.mean(search['ratio']):.3f}), the same for {np.mean(search['width_same']):.3f}; "
+        f"offset the same for {np.mean(search['offset_same']):.3f}"
+    )
+    # How much narrower is the code's kernel than the text's, on the notebook's data?
+    default_rows = methods.sample_landmarks(leverage, n_landmarks, seed=0)
+    width_ratio = []
+    for view, width in zip(views, scales[1], strict=True):
+        rows = methods.l2_normalize(view)
+        _, distances = methods.nearest_rows(rows, rows[default_rows], 20)
+        width_ratio.append(width / (distances[:, 19] - distances[:, 0]))
+    width_ratio = float(np.median(np.concatenate(width_ratio)))
+    print(
+        f"   The code's width is {width_ratio:.2f} of the text's (median over cells and views)"
+    )
 
     saved = {
         "seurat_version": summary["seurat"],
@@ -346,11 +544,8 @@ def main(argv: list[str] | None = None) -> int:
         "cells": len(guide),
         "python_vs_python": [round(value, 4) for value in python_floor],
         "seurat_vs_seurat": [round(value, 4) for value in seurat_floor],
-        "python_vs_seurat": {
-            "mean": round(float(np.mean(across)), 4),
-            "min": round(min(across), 4),
-            "max": round(max(across), 4),
-        },
+        "python_vs_seurat": spread(across),
+        "paper_text_vs_seurat": spread(across_text),
         "uniform_vs_leverage_landmarks": round(uniform_vs_leverage, 4),
         "subspace_agreement": {
             name: round(value, 4) for name, value in agreement.items()
@@ -358,7 +553,27 @@ def main(argv: list[str] | None = None) -> int:
         "with_seurat_landmark_cells": {
             name: round(value, 4) for name, value in transplants.items()
         },
-        "weight_sweep_with_seurat_landmark_cells": sweep,
+        "voting_cells": int(len(guide) - n_landmarks),
+        "seurat_table_follows_from_its_neighbours": all(table_follows),
+        "rules_on_seurat_coordinates": [
+            {
+                "rule": row["rule"],
+                "same_five": round(row["same_five"], 4),
+                "cells_differing": row["cells_differing"],
+                "votes_moved": round(row["votes_moved"], 1),
+                "r_with_seurat": round(row["r_with_seurat"], 4),
+                "ribosomal": round(row["ribosomal"], 4),
+            }
+            for row in rule_rows
+        ],
+        "seurat_ribosomal": round(seurat_ribosomal, 4),
+        "approximate_search": {
+            "width_larger": round(float(np.mean(search["width_larger"])), 4),
+            "width_same": round(float(np.mean(search["width_same"])), 4),
+            "offset_same": round(float(np.mean(search["offset_same"])), 4),
+            "median_factor_where_larger": round(float(np.mean(search["ratio"])), 4),
+        },
+        "code_width_over_text_width": round(width_ratio, 4),
         "what_each_matrix_says": {
             name: {key: round(value, 4) for key, value in row.items()}
             for name, row in table.items()

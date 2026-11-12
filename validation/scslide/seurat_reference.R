@@ -1,10 +1,15 @@
 # Reference run of scSLIDE in Seurat 6 on the Jost et al. 2020 Perturb-seq data.
 #
-# The Python notebook is written from the paper's Methods, not from Seurat's
-# source. This script runs Seurat itself, as a black box, on the same cells and
-# with the same parameters, so the two results can be compared (compare.py).
-# It calls only documented functions, in the order of the scSLIDE vignette:
+# The Python notebook is written from the paper's Methods. This script runs
+# Seurat itself on the same cells and with the same parameters, so the two
+# results can be compared (compare.py). It calls documented functions, in the
+# order of the scSLIDE vignette:
 # https://satijalab.org/seurat/articles/scslide_vignette
+#
+# There is one exception, marked below: an internal function is called once, to
+# write out two numbers per cell that FindmmNN computes and does not keep. We
+# learned of them by reading Seurat's source (MIT licence) after the first
+# comparison left one difference unexplained.
 #
 # Seurat 6 lives in an isolated library, .r-lib/ at the repository root, so the
 # machine's own R library is left alone. Install it once with:
@@ -193,6 +198,58 @@ cells <- data.frame(
     Embeddings(object, "proj.pls")[, 1:n_pls]
 )
 write.csv(cells, gzfile(file.path(out_dir, sprintf("cells_%s.csv.gz", tag))), row.names = FALSE)
+
+# Every cell's landmarks as FindmmNN stored them, best first, so that compare.py
+# can check them cell by cell. FindmmNN keeps 20 per cell and GenerateSampleObject
+# reads the first k_landmarks of them. A neighbour is stored as a row number of
+# the landmark-only object that FindmmNN builds, so that object's cell order is
+# written next to it. The stored value is sqrt((1 - joint affinity) / 2).
+neighbours <- object[["weighted.nn"]]
+stopifnot(identical(Cells(neighbours), colnames(object)))
+landmark_order <- colnames(subset(object, cells = Cells(object[["LANDMARK"]])))
+neighbour_table <- data.frame(
+    cell_barcode = Cells(neighbours),
+    index = Indices(neighbours),
+    value = Distances(neighbours)
+)
+write.csv(
+    neighbour_table,
+    gzfile(file.path(out_dir, sprintf("neighbours_%s.csv.gz", tag))),
+    row.names = FALSE
+)
+writeLines(landmark_order, file.path(out_dir, sprintf("landmark_order_%s.txt", tag)))
+
+# The one call to an internal function. To judge how near a landmark is,
+# FindmmNN first measures every cell's surroundings among all cells: the
+# distance to its nearest other cell (the offset) and how much farther its
+# 20th nearest row lies (the width). It finds them with an approximate search
+# and does not store them. The same internal call, with the arguments FindmmNN
+# passes, gives them again, so compare.py can tell the rule from the search.
+surroundings <- slot(
+    Seurat:::FindModalityWeights(
+        object = object,
+        reduction.list = list("pca", "proj.pls"),
+        dims.list = list(1:n_pca, 1:n_pls),
+        fix.wnn.weights = c(0.5, 0.5),
+        snn.far.nn = FALSE,
+        l2.norm = TRUE,
+        k.nn = 20,
+        verbose = FALSE
+    ),
+    "params"
+)
+scale_table <- data.frame(
+    cell_barcode = colnames(object),
+    offset_pca = surroundings$nearest.dist[[1]],
+    offset_pls = surroundings$nearest.dist[[2]],
+    width_pca = surroundings$sigma.list[[1]],
+    width_pls = surroundings$sigma.list[[2]]
+)
+write.csv(
+    scale_table,
+    gzfile(file.path(out_dir, sprintf("scales_%s.csv.gz", tag))),
+    row.names = FALSE
+)
 
 summary_lines <- c(
     sprintf("seurat %s", packageVersion("Seurat")),

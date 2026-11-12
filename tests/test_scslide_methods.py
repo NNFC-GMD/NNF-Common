@@ -58,6 +58,67 @@ def test_landmark_affinity_follows_the_kernel_formula(scslide):
     assert affinities[0, 0] == pytest.approx(expected, rel=1e-4)
 
 
+def test_local_scales_read_the_nearest_other_cell_and_the_last_ranked_row(scslide):
+    rng = np.random.default_rng(4)
+    view_a, view_b = rng.normal(size=(60, 5)), rng.normal(size=(60, 3))
+
+    offsets, widths = scslide.local_scales([view_a, view_b], rank=6, chunk_size=16)
+
+    assert offsets.shape == widths.shape == (2, 60)
+    for row, view in enumerate([view_a, view_b]):
+        unit = view / np.linalg.norm(view, axis=1, keepdims=True)
+        full = np.linalg.norm(unit[:, None, :] - unit[None, :, :], axis=2)
+        # Column 0 is the cell itself, so column 5 is the sixth row of the search.
+        ranked = np.sort(full, axis=1)
+        assert offsets[row] == pytest.approx(ranked[:, 1], abs=1e-4)
+        assert widths[row] == pytest.approx(ranked[:, 5] - ranked[:, 1], abs=1e-4)
+
+
+def test_landmark_affinity_uses_the_scales_it_is_given(scslide):
+    # One cell at angle 0; landmarks at 10, 20 and 40 degrees on the unit circle.
+    angles = np.deg2rad([10.0, 20.0, 40.0])
+    cell = np.array([[1.0, 0.0]])
+    landmarks = np.column_stack([np.cos(angles), np.sin(angles)])
+    distance = 2.0 * np.sin(angles / 2.0)
+    # The offset lies between the first and the second landmark.
+    offset = np.array([[(distance[0] + distance[1]) / 2.0]])
+    width = np.array([[0.25]])
+
+    _, affinities, _ = scslide.landmark_affinities(
+        [cell], [landmarks], candidates=3, scales=(offset, width)
+    )
+
+    expected = np.exp(-np.maximum(distance - offset[0, 0], 0.0) / 0.25)
+    assert expected[0] == 1.0, "a landmark closer than the offset scores one"
+    assert affinities[0, 0] == pytest.approx(expected, rel=1e-4)
+
+
+def test_the_two_rules_for_a_cell_s_surroundings_pick_different_landmarks(scslide):
+    rng = np.random.default_rng(5)
+    view_a, view_b = rng.normal(size=(400, 6)), rng.normal(size=(400, 4))
+    chosen = np.arange(0, 400, 8)
+    landmark_views = [view_a[chosen], view_b[chosen]]
+
+    from_landmarks = scslide.top_landmarks(
+        *scslide.landmark_affinities([view_a, view_b], landmark_views, candidates=30),
+        k=5,
+    )[0]
+    from_cells = scslide.top_landmarks(
+        *scslide.landmark_affinities(
+            [view_a, view_b],
+            landmark_views,
+            candidates=30,
+            scales=scslide.local_scales([view_a, view_b]),
+        ),
+        k=5,
+    )[0]
+
+    same = (np.sort(from_landmarks, axis=1) == np.sort(from_cells, axis=1)).all(axis=1)
+    assert 0.0 < same.mean() < 1.0
+    # Whatever the rule, a landmark cell is nearest to itself.
+    assert from_cells[chosen, 0].tolist() == list(range(len(chosen)))
+
+
 def test_top_landmarks_never_returns_a_landmark_twice(scslide):
     rng = np.random.default_rng(2)
     cells_a, cells_b = rng.normal(size=(30, 4)), rng.normal(size=(30, 3))

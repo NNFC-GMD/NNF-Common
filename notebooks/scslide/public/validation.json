@@ -13,58 +13,87 @@
     "seurat_count_total": 72935,
     "cells": 19587,
     "python_vs_python": [
-        0.9843,
-        0.9845,
-        0.9837
+        0.9836,
+        0.9844,
+        0.9827
     ],
     "seurat_vs_seurat": [
         0.9837
     ],
     "python_vs_seurat": {
+        "mean": 0.9825,
+        "min": 0.9809,
+        "max": 0.9836
+    },
+    "paper_text_vs_seurat": {
         "mean": 0.9811,
         "min": 0.9796,
         "max": 0.9819
     },
-    "uniform_vs_leverage_landmarks": 0.9682,
+    "uniform_vs_leverage_landmarks": 0.9658,
     "subspace_agreement": {
         "pca": 1.0,
         "pls": 0.9999
     },
     "with_seurat_landmark_cells": {
-        "seurat_coordinates_landmarks_do_not_vote": 0.9931,
-        "seurat_coordinates_every_cell_votes": 0.9848,
-        "python_coordinates_landmarks_do_not_vote": 0.9929,
-        "python_coordinates_every_cell_votes": 0.9847
+        "python_coordinates": 0.9988,
+        "python_coordinates_every_cell_votes": 0.9897
     },
-    "weight_sweep_with_seurat_landmark_cells": [
+    "voting_cells": 14587,
+    "seurat_table_follows_from_its_neighbours": true,
+    "rules_on_seurat_coordinates": [
         {
-            "weight": 0.4,
-            "r_with_seurat": 0.9757,
-            "ribosomal": 0.1718
+            "rule": "paper_text",
+            "same_five": 0.3333,
+            "cells_differing": [
+                9684,
+                9765
+            ],
+            "votes_moved": 11930.5,
+            "r_with_seurat": 0.9931,
+            "ribosomal": 0.0595
         },
         {
-            "weight": 0.45,
-            "r_with_seurat": 0.9911,
-            "ribosomal": 0.1145
+            "rule": "code_exact",
+            "same_five": 0.9324,
+            "cells_differing": [
+                974,
+                999
+            ],
+            "votes_moved": 1007.5,
+            "r_with_seurat": 0.9995,
+            "ribosomal": 0.1161
         },
         {
-            "weight": 0.5,
-            "r_with_seurat": 0.9929,
-            "ribosomal": 0.056
-        },
-        {
-            "weight": 0.55,
-            "r_with_seurat": 0.9874,
-            "ribosomal": 0.0105
-        },
-        {
-            "weight": 0.6,
-            "r_with_seurat": 0.9788,
-            "ribosomal": -0.0112
+            "rule": "code_seurat_values",
+            "same_five": 1.0,
+            "cells_differing": [
+                1,
+                0
+            ],
+            "votes_moved": 0.5,
+            "r_with_seurat": 1.0,
+            "ribosomal": 0.1156
         }
     ],
+    "seurat_ribosomal": 0.1156,
+    "approximate_search": {
+        "width_larger": 0.4832,
+        "width_same": 0.5121,
+        "offset_same": 0.9928,
+        "median_factor_where_larger": 1.029
+    },
+    "code_width_over_text_width": 0.6586,
     "what_each_matrix_says": {
         "Python": {
+            "3-NN accuracy": 0.9453,
+            "Spearman, near controls vs activity": -0.4853,
+            "control-control r": 0.065,
+            "same-gene r (active guides)": 0.5073,
+            "RPS14/15/18 cross r": 0.1221,
+            "EIF2S1-HSPA9 r": 0.2743
+        },
+        "Python, following the paper's text": {
             "3-NN accuracy": 0.9453,
             "Spearman, near controls vs activity": -0.4877,
             "control-control r": 0.0658,
@@ -90,11 +119,11 @@
         },
         "Python, with Seurat's landmark cells": {
             "3-NN accuracy": 0.9531,
-            "Spearman, near controls vs activity": -0.495,
-            "control-control r": 0.0658,
-            "same-gene r (active guides)": 0.5173,
-            "RPS14/15/18 cross r": 0.056,
-            "EIF2S1-HSPA9 r": 0.2431
+            "Spearman, near controls vs activity": -0.4986,
+            "control-control r": 0.0661,
+            "same-gene r (active guides)": 0.5091,
+            "RPS14/15/18 cross r": 0.1129,
+            "EIF2S1-HSPA9 r": 0.241
         }
     }
 }

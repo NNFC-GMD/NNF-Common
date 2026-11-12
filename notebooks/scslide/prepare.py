@@ -4,7 +4,8 @@ The raw data (GEO series GSE132080, a 336 MB count matrix) is far too large
 for a browser, so this script does the heavy steps once, natively, and writes
 a few megabytes of derived data to ``public/``:
 
-    cells.npz       per-cell coordinates, landmark weights and target-gene expression
+    cells.npz       per-cell coordinates, landmark weights, each cell's
+                    surroundings and target-gene expression
     sgrna.csv       one row per guide RNA, with the activity scores of the original study
     manifest.json   provenance, parameters, summary numbers and checksums
 
@@ -444,6 +445,15 @@ def main(argv: list[str] | None = None) -> int:
         flush=True,
     )
 
+    # Every cell's surroundings among all cells, which Seurat's code uses to
+    # judge how near a landmark is. Measured on the coordinates as they are
+    # stored, so the notebook gets the same numbers from the file.
+    print("measuring every cell's surroundings", flush=True)
+    stored_views = [view.astype(np.float16).astype(np.float32) for view in (pca, pls)]
+    scale_offset, scale_width = methods.local_scales(
+        stored_views, rank=PARAMETERS["bandwidth_rank"]
+    )
+
     # A two-dimensional picture of the cells, from the joint view.
     print("computing the UMAP", flush=True)
     neighbours = joint_cell_neighbours(
@@ -487,6 +497,8 @@ def main(argv: list[str] | None = None) -> int:
             "umap": embedding.astype(np.float16),
             "leverage": leverage,
             "landmark": landmark,
+            "scale_offset": scale_offset.astype(np.float32),
+            "scale_width": scale_width.astype(np.float32),
             "guide": guide_code.to_numpy().astype(np.int16),
             "target_expression": target_expression.astype(np.float16),
             "target_genes": np.array(target_genes),
