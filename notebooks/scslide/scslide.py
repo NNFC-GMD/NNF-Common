@@ -1375,41 +1375,59 @@ def _():
 @app.cell(hide_code=True)
 def _(effect_size):
     _rng = np.random.default_rng(3)
-    _n = 600
+    _n, _n_genes = 600, 120
     _cell_type = _rng.integers(0, 2, _n)
     _treated = _rng.integers(0, 2, _n)
-    _features = _rng.normal(size=(_n, 12))
-    # Six genes mark the cell type; three other genes respond to the treatment.
-    _features[:, :6] += 2.5 * _cell_type[:, None]
-    _features[:, 8:11] += effect_size.value * _treated[:, None]
+    # A third thing going on, which nobody labelled: how far each cell has got
+    # through a program that cells of both types go through.
+    _program = _rng.normal(size=_n)
+    _n_type, _n_program, _n_treated = 12, 12, 4
+    _features = _rng.normal(size=(_n, _n_genes))
+    _features[:, 0:_n_type] += 3.0 * _cell_type[:, None]
+    _features[:, _n_type : _n_type + _n_program] += 1.2 * _program[:, None]
+    _features[:, 40 : 40 + _n_treated] += effect_size.value * _treated[:, None]
     _features = (_features - _features.mean(axis=0)) / _features.std(axis=0)
+    _jitter = _rng.uniform(size=_n)
 
-    _pca = np.linalg.svd(_features, full_matrices=False)
-    _pca = _pca[0][:, :2] * _pca[1][:2]
-    _pls = canonical_pls(_features, np.eye(2)[_treated], 2)["scores"]
+    # The unsupervised view: the directions of largest spread, in order.
+    _left, _weight, _ = np.linalg.svd(_features, full_matrices=False)
+    _unsupervised = _left[:, :30] * _weight[:30]
+    # The label-aware view: the directions that follow the treatment label.
+    _label_aware = canonical_pls(_features, np.eye(2)[_treated], 2)["scores"]
 
-    def _frame(coordinates, name):
-        return pd.DataFrame(coordinates, columns=["first", "second"]).assign(
-            view=name,
-            treatment=np.where(_treated == 1, "Treated", "Untreated"),
-            kind=np.where(_cell_type == 1, "Cell type 2", "Cell type 1"),
-        )
+    def _shows(axis, labels):
+        """How much of `labels` one direction accounts for, from 0 to 1."""
+        return float(np.corrcoef(axis, labels)[0, 1] ** 2)
 
-    def _explained(coordinates, labels):
-        return float(np.corrcoef(coordinates[:, 0], labels)[0, 1] ** 2)
+    _carried = [
+        _shows(_unsupervised[:, column], _treated)
+        for column in range(_unsupervised.shape[1])
+    ]
+    _buried = int(np.argmax(_carried)) + 1
+    _second_text = f"{_shows(_unsupervised[:, 1], _program):.0%} of it"
+    _buried_text = (
+        f"it is direction {_buried} of the unsupervised view here"
+        if max(_carried) >= 0.1
+        else "with the effect this small there is nothing much to find"
+    )
 
-    _both = pd.concat(
-        [
-            _frame(_pca, "Unsupervised view (PCA)"),
-            _frame(_pls, "Label-aware view (PLS)"),
-        ]
+    _frame = pd.DataFrame(
+        {
+            "position": np.concatenate([_unsupervised[:, 0], _label_aware[:, 0]]),
+            "jitter": np.tile(_jitter, 2),
+            "view": np.repeat(
+                ["Unsupervised view (PCA)", "Label-aware view (PLS)"], _n
+            ),
+            "treatment": np.tile(np.where(_treated == 1, "Treated", "Untreated"), 2),
+            "kind": np.tile(np.where(_cell_type == 1, "Cell type 2", "Cell type 1"), 2),
+        }
     )
     _picture = (
-        alt.Chart(_both)
-        .mark_point(size=28, opacity=0.6, filled=True)
+        alt.Chart(_frame)
+        .mark_point(size=34, opacity=0.65, filled=True)
         .encode(
-            x=alt.X("first:Q", title="First axis"),
-            y=alt.Y("second:Q", title="Second axis"),
+            x=alt.X("position:Q", title="Position along the first direction"),
+            y=alt.Y("jitter:Q", axis=None, title=None),
             color=alt.Color(
                 "treatment:N",
                 title="Treatment",
@@ -1417,63 +1435,106 @@ def _(effect_size):
             ),
             shape=alt.Shape("kind:N", title="Cell type"),
         )
-        .properties(width=290, height=260)
+        .properties(width=520, height=130)
         .facet(
-            column=alt.Column("view:N", title=None, sort=["Unsupervised view (PCA)"])
+            row=alt.Row(
+                "view:N",
+                title=None,
+                sort=["Unsupervised view (PCA)"],
+                header=alt.Header(
+                    labelAngle=0,
+                    labelOrient="top",
+                    labelAnchor="start",
+                    labelFontSize=13,
+                    labelFontWeight="bold",
+                    labelPadding=4,
+                ),
+            )
         )
-        .resolve_scale(x="independent", y="independent")
+        .resolve_scale(x="independent")
     )
     _table = pd.DataFrame(
         {
-            "First axis of": ["Unsupervised view (PCA)", "Label-aware view (PLS)"],
-            "explained by cell type": [
-                f"{_explained(_pca, _cell_type):.0%}",
-                f"{_explained(_pls, _cell_type):.0%}",
+            "The first direction of": [
+                "Unsupervised view (PCA)",
+                "Label-aware view (PLS)",
             ],
-            "explained by treatment": [
-                f"{_explained(_pca, _treated):.0%}",
-                f"{_explained(_pls, _treated):.0%}",
+            "shows this much of the cell type": [
+                f"{_shows(_unsupervised[:, 0], _cell_type):.0%}",
+                f"{_shows(_label_aware[:, 0], _cell_type):.0%}",
+            ],
+            "and this much of the treatment": [
+                f"{_shows(_unsupervised[:, 0], _treated):.0%}",
+                f"{_shows(_label_aware[:, 0], _treated):.0%}",
             ],
         }
     )
     mo.vstack(
         [
             mo.md(
-                """
+                f"""
                 ## Step 1. Two ways to look at a cell
 
                 Counting cells around landmarks needs a map on which cells that
-                are alike sit close together. Which map? scSLIDE uses two.
+                are alike sit close together. Which map? scSLIDE uses two,
+                because one map cannot show everything at once.
 
                 The **unsupervised view** is what every single-cell analysis
                 starts with: principal component analysis (PCA), or a reference
-                atlas. It finds the directions in which cells differ most. Those
-                are usually cell types, so it is good at keeping cell types apart.
-                A subtle effect of disease or treatment, carried by few genes,
-                can be invisible in it.
+                atlas. It looks for the directions in which cells differ most
+                and shows those first. Those are usually cell types. Anything
+                smaller has to queue behind them.
 
-                The **label-aware view** uses partial least squares (PLS). PLS is
-                told a label for every cell, such as *treated* or *untreated*,
-                and finds the directions that follow that label. It picks up
-                subtle effects, but it sees only what it was told to look for
-                and it blurs the cell types.
+                The **label-aware view** uses partial least squares (PLS). PLS
+                is told a label for every cell, here *treated* or *untreated*,
+                and looks only for directions that follow that label. It finds
+                a small effect at once. It also finds nothing else, because it
+                looks nowhere else.
 
-                In this toy, six genes mark the cell type and three other
-                genes respond to a treatment.
+                In this toy each cell has {_n_genes} genes and three things are
+                going on at once. {_n_type} genes mark the **cell type**, which
+                is the shape of each dot. {_n_program} more follow a **shared
+                program** that cells of both types go through. {_n_treated}
+                respond to a **treatment**, which is the colour. Only the
+                treatment is labelled.
                 """
             ),
             effect_size,
             _picture,
-            markdown_table(_table),
             mo.md(
                 """
-                The unsupervised view separates the two cell types (the two
-                shapes) and mixes the colours. The label-aware view pulls the
-                colours apart along its first axis. Slide the effect to zero:
-                the label-aware view then has nothing real to find, and the
-                little it shows is chance.
+                Each row is the leading direction of one view. A dot's position
+                from left to right is where that cell sits along it. The height
+                means nothing; it only keeps the dots from covering each other.
+                """
+            ),
+            markdown_table(_table),
+            mo.md(
+                f"""
+                The two rows do not separate the cells the same way, and that
+                is the point.
 
-                Neither view is enough alone, which is why scSLIDE keeps both.
+                The unsupervised view leads with the **cell type**: the shapes
+                split, and the colours stay mixed throughout. The treatment has
+                not vanished from it, it is queueing: the shared program takes
+                the second direction ({_second_text}), and the treatment comes
+                after ({_buried_text}). In real data, where thousands of genes and
+                many kinds of cell compete for the first directions, a small
+                effect can queue well past the last direction anyone keeps.
+
+                The label-aware view leads with the **treatment**: the colours
+                split, and the shapes mix. It was handed the labels, so this is
+                the one thing it looks for.
+
+                Now slide the effect to zero. There is nothing left to find,
+                and yet the label-aware view still spreads the colours a
+                little, and its number in the table stays above zero. Among
+                {_n_genes} genes, some will follow the labels by luck. That is
+                why this page later leans on a check that the method was never
+                told about.
+
+                Neither view is enough on its own, which is why scSLIDE keeps
+                both and joins them in the next step.
                 """
             ),
         ]
