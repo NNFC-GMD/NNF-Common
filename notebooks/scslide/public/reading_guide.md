@@ -1,6 +1,6 @@
 ## The papers behind each step
 
-This is a reading guide to 14 papers that scSLIDE builds on or is compared with: for each, what it did and why it matters here, in plain language. Eleven were asked for by a reader, and three more were added because they are the sources for three methods the reader asked about: diffusion maps, weighted nearest neighbours (WNN) and optimal transport. Each entry was written from the text of the paper, not from memory, and says how much of it was read: the full text, the abstract only, or nothing where the text could not be reached.
+This is a reading guide to 14 papers that scSLIDE builds on or is compared with: for each, what it did and why it matters here, in plain language. Eleven were asked for by a reader, and three more were added because they are the sources for three methods the reader asked about: diffusion maps, weighted nearest neighbours (WNN) and optimal transport. Each entry was written from the text of the paper, not from memory, and says how much of it was read.
 
 ### Testing abundance between two groups
 
@@ -24,15 +24,15 @@ Lun, Richard and Marioni (2017). *Nature Methods* 14:707-709. [doi:10.1038/nmeth
 
 Zhao et al. (2021). *PNAS* 118:e2100293118. [doi:10.1073/pnas.2100293118](https://doi.org/10.1073/pnas.2100293118). Reference 20 in the scSLIDE paper.
 
-**In one sentence.** DA-seq scores every cell by how strongly its neighbourhood is dominated by one of two biological states, then outlines the regions where abundance differs.
+**In one sentence.** DA-seq measures how far each cell's most similar cells lean towards one of two biological states, then groups cells with extreme values into regions that need not match any cluster.
 
-**What they did.** Comparisons of two states, such as healthy and diseased, usually start by clustering all cells, and can miss a difference that does not follow the clusters. DA-seq looks at each cell's nearest neighbours (the cells most similar to it) at several neighbourhood sizes and asks how many come from each state. In the preprint, a simple statistical model combines these numbers into one score per cell, and cells with extreme scores are grouped into contiguous regions. On data from COVID-19, melanoma immunotherapy, embryonic development and the ageing brain, the authors report recovering the published differences and finding additional ones.
+**What they did.** Comparing two states, such as healthy and diseased, usually starts by clustering cells, which can miss differences within a cluster or across several. For each cell, DA-seq compares how many nearest neighbours (the most similar cells) come from each state, at several neighbourhood sizes. A statistical model (logistic regression) that predicts the cell's state from these numbers gives each cell one differential abundance (DA) measure. Cells with values beyond what shuffled state labels give by chance, or beyond cut-offs set by the user, are clustered into regions ("DA subpopulations"), each described by marker genes. On melanoma immunotherapy, embryonic mouse skin and COVID-19 data it outlined five regions each: some overlapped published differences, others the authors call new. In a simulation it located planted differences better than cydar.
 
 **Why scSLIDE cites it.** It is another of the scSLIDE paper's examples of abundance testing between groups.
 
-**For village and differentiation data.** Our reading: DA-seq compares exactly two states, such as two time points, and labels each cell only by its state. In the preprint, replicate samples come in only afterwards, to check the regions found.
+**For village and differentiation data.** Our reading: DA-seq compares exactly two states, such as two time points, and labels each cell only by its state, so one donor line alone could produce a region. When the authors split the melanoma samples into two halves and analysed each, two regions seen in only one half had an excess of cells from single patients. The regions also depend on a cut-off: the figures use 0.8 on a scale from -1 to 1, and in the melanoma data the shuffling test alone flagged roughly 70% of cells. For a time series the authors suggest, as a possible extension, comparing states in pairs. They also warn that uncorrected batch effects (technical differences between samples) can appear as regions.
 
-**Read:** abstract only for the published paper, plus the full text of bioRxiv preprint version 3.
+**Read:** full text of the main paper. Its supplement, which holds the ageing brain analysis and the full simulations, was not read.
 
 #### propeller: testing cell-type proportions with replicates
 
@@ -130,9 +130,15 @@ These five papers supply building blocks that scSLIDE uses or cites: partial lea
 
 Geladi and Kowalski (1986). *Analytica Chimica Acta* 185:1-17. [doi:10.1016/0003-2670(86)80028-9](https://doi.org/10.1016/0003-2670%2886%2980028-9). Reference 40 in the scSLIDE paper.
 
-The text of this paper could not be reached, so it is not summarised here.
+**In one sentence.** This tutorial, written for chemists, explains partial least squares (PLS) regression, which predicts outcomes from measurements through summary axes chosen with those outcomes in view.
 
-**Why scSLIDE cites it.** The scSLIDE paper cites it for partial least squares itself, which it describes as finding low-dimensional projections that maximise covariance with outcome variables. Step 1 of this page shows what that means on a small example.
+**What they did.** Finding most earlier accounts of PLS incomplete and often hard to follow, the authors build it up in steps. Multiple linear regression predicts an outcome from all measured variables at once. It has no single answer when variables outnumber the chemical samples, and can fail when variables are collinear (carry overlapping information). Principal component regression replaces the measurements with summary axes and drops the minor ones, without looking at the outcomes, so predictive information can be lost. PLS finds axes for measurements and outcomes together: in each round, each side's axes are updated from the other's scores (a sample's position along an axis). The tutorial also covers rescaling variables whose units differ and choosing how many axes to keep. No data are analysed: a simulated example is left to a companion paper.
+
+**Why scSLIDE cites it.** The scSLIDE paper cites it for partial least squares itself. That paper describes PLS as finding a few summary axes, chosen so that positions along them vary together with the outcome variables as strongly as possible; Step 1 of this page shows this on a small example. The tutorial words it differently: its stated aim is to account for the outcomes as fully as possible while relating them usefully to the measurements. The PLS code on this page is not the tutorial's algorithm: like scSLIDE itself, it follows a later variant, canonical PLS (reference 110 in the scSLIDE paper).
+
+**For village and differentiation data.** Our reading: the warning about principal component regression carries over. Axes drawn from gene expression alone could leave out a subtle difference between donor lines or time points. Giving PLS a label for every cell, as Step 1 of this page does, is a use the tutorial does not teach. Its outcomes are measured variables in chemistry, and it lists classification (sorting samples into named groups) among the topics it leaves out or does not cover in detail. The authors add that the best number of axes is not always clear.
+
+**Read:** full text.
 
 #### WNN: merging two views of the same cells
 
@@ -180,15 +186,15 @@ Hao et al. (2024). *Nature Biotechnology* 42:293-304. [doi:10.1038/s41587-023-01
 
 Haghverdi, Buettner and Theis (2015). *Bioinformatics* 31:2989-2998. [doi:10.1093/bioinformatics/btv325](https://doi.org/10.1093/bioinformatics/btv325). Reference 7 in the scSLIDE paper.
 
-**In one sentence.** The authors adapt diffusion maps, a non-linear way of reducing many measurements to a few axes, to place single cells in order along differentiation.
+**In one sentence.** The authors adapt diffusion maps, which reduce many measurements to a few axes that need not be straight, so that single cells are laid out along the branching paths of differentiation.
 
-**What they did.** Differentiating cells are not expected to form clear clusters but to follow continuous, branching lineages. The authors adapt diffusion maps to single-cell data, with a suitable kernel width (the scale at which two cells count as similar) and a way to include uncertain or missing measurements. This gives a pseudotemporal ordering: cells are ranked by progress through the process, not by clock time. They report robustness to measurement noise and to uneven sampling density on simulated data, two single-cell qPCR data sets and RNA sequencing of human embryos. Diffusion maps did considerably better than principal component analysis, and kept global structure and cell order better than t-SNE (two common alternatives).
+**What they did.** Differentiating cells change gradually and branch into lineages, which clusters describe poorly. A diffusion map imagines a walker stepping at random between similar cells, and places cells joined by many paths close together. The authors adapt it: the walker never stays put, crowded regions are weighted down, and missing or undetected values count as uncertain. A rule of thumb suggests how close counts as similar. The authors call the result a pseudotemporal ordering of cells. They judge it by eye, and against published lineage trees, next to principal component analysis (PCA) and t-SNE, two common alternatives. On a clean simulation PCA did about as well. On a noisy, unevenly sampled one and on two mouse qPCR data sets (597 and 429 cells), the diffusion map kept the paths clearer than either. On 90 cells from human oocytes and embryos, PCA and t-SNE did almost as well.
 
-**Why scSLIDE cites it.** scSLIDE applies diffusion maps to its sample-level table, so that samples are placed in order.
+**Why scSLIDE cites it.** scSLIDE applies diffusion maps to its sample-level table, so that samples are placed in order. Its Methods also cite the paper for the point that PCA, a straight-line method, may do poorly when variation is curved or branching. scSLIDE runs the destiny software; the paper itself describes an earlier implementation in Matlab.
 
-**For village and differentiation data.** Our reading: the premise, a continuum and not separate clusters, is the situation in a differentiating village. Note the change of unit: the paper orders cells, while scSLIDE orders samples such as donor lines, which are far fewer.
+**For village and differentiation data.** Our reading: a differentiating village fits the premise of gradual change, but the paper lays out cells, while scSLIDE lays out samples, which are far fewer. The authors put the 90-cell result down to the small number of cells, and we would expect the same of few samples. They note that the map does not show which way time runs, so in our view the order needs an anchor, such as the known time points. They also warn that, once "similar" is drawn widely enough, the map links all cells, so a link on the map does not prove a biological one, and that a fast transition can leave no in-between cells in a snapshot.
 
-**Read:** abstract only.
+**Read:** full text of the main paper. Its supplementary figures, where the text places the tests of each adjustment, were not read.
 
 ### After the samples are ordered
 

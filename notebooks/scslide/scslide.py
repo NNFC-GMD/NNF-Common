@@ -26,8 +26,7 @@
 
 The method is from Jiang et al., "Reconstructing developmental and disease
 progression with sample-level embeddings" (Cell, doi 10.1016/j.cell.2026.10.018).
-Every function below is written from that paper's STAR Methods. Nothing is
-copied or translated from the Seurat source code.
+Every function below is written from that paper's STAR Methods.
 """
 
 import marimo
@@ -2250,10 +2249,12 @@ def _(bend):
 
                 The usual way to reduce many numbers to a few is PCA. It draws
                 straight axes through the data. scSLIDE uses a **diffusion
-                map** instead. A diffusion map imagines a walker hopping from
-                each sample to its closest neighbours, and asks which samples
-                the walker reaches quickly from which. It follows the chain of
-                neighbours, wherever the chain goes.
+                map** instead. A diffusion map imagines a walker hopping
+                between samples that resemble each other, and asks which
+                samples the walker reaches quickly from which. It follows the
+                chain of neighbours, wherever the chain goes. The version on
+                this page is a simplified one: the walker may only hop to a
+                sample's few closest neighbours.
 
                 The difference shows when a progression bends back on itself:
                 late samples start to resemble early ones in the feature that

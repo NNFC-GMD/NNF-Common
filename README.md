@@ -120,7 +120,3 @@ pixi run -e prep prepare-scslide
 ## License
 
 MIT. See `LICENSE`.
-
-The scSLIDE code was written from the paper's Methods. No Seurat source code
-was copied or translated. Figures are drawn from public data; none is taken
-from a paper.
